@@ -6,9 +6,10 @@
   "openchamber": {
     "apiVersion": 1,
     "engines": {
-      "openchamber": ">=1.22.0"
+      "openchamber": ">=1.24.0"
     },
     "contributes": {
+      "capabilities": ["model", "files"],
       "panel": {
         "id": "habit",
         "name": "Habit",

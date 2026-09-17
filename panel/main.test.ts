@@ -114,20 +114,22 @@ test('capture inputs survive ready refresh and context repaints', async () => {
     expect(capture.querySelector('[data-field="detail"]').value).toBe('Keep this detail');
     expect(captureRenders).toBe(1);
     await settle();
-    expect(listHtml).toContain('Confidence: 50%');
+    expect(listHtml).toContain('0 confirmations · 0 contradictions');
     click('confirm');
     click('confirm'); // duplicate while the write is pending is ignored
     await settle();
     expect(stored.get('habit:global:h1').supporting).toBe(1);
-    expect(listHtml).toContain('Confidence: 67%');
+    expect(listHtml).toContain('1 confirmation · 0 contradictions');
+    expect(listHtml).not.toContain('Confidence:');
     // Refresh reads the persisted counts rather than losing feedback.
     callbacks.ready({ directory: '/b', session: null, item: null });
     await settle();
-    expect(listHtml).toContain('Confidence: 67%');
+    expect(listHtml).toContain('1 confirmation · 0 contradictions');
+    expect(listHtml).not.toContain('Confidence:');
     click('contradict');
     await settle();
     expect(stored.get('habit:global:h1').contradicting).toBe(1);
-    expect(listHtml).toContain('Confidence: 50%');
+    expect(listHtml).toContain('1 confirmation · 1 contradiction');
     click('insert');
     click('copy');
     await settle();

@@ -2,7 +2,11 @@
 
 Keep what your agent should remember. A panel extension that captures project
 and global habits, curates them, and inserts them back into the draft.
-The session action requests conversation access. Habit does not use git.
+Requires OpenChamber 1.24.0 or newer. The session action requests conversation
+access; the manifest also requests model and project-file access for upcoming
+learning work. Updating an existing installation requires approval of those
+additional permissions. Extraction and project-file writes are not implemented
+yet. Habit does not use git.
 
 ## Install from GitHub
 
@@ -37,20 +41,19 @@ you save and do not use Habit to store credentials.
 3. **Recall** — the panel lists what applies here; Insert composes it into
    the draft, Copy takes it to the clipboard. Edit and Forget curate.
 
-## Feedback confidence
+## Feedback counts
 
-**Confirm preference** adds supporting feedback; **Contradict preference** adds
-contradicting feedback without deleting the habit. The displayed score is
-`(1 + supporting) / (2 + supporting + contradicting)`: initially 50%, then
-67% after one confirmation. It is a heuristic feedback score, not a calibrated
-probability that the preference is correct. Insert and Copy never increase it.
+**Confirm preference** and **Contradict preference** record explicit feedback.
+The panel shows counts (for example, “1 confirmation · 0 contradictions”),
+not percentages or estimated preference strength. Insert and Copy never add
+feedback. Editing the habit text resets feedback measured against the old text.
 
-Counts persist with each memory in OpenChamber's extension storage on the
-connected server. Older memories start with no recorded feedback. This slice
-does not passively observe conversations, run extraction, or write a project
-`habits.json` file. The standalone engine's file helpers are not wired into the
-panel. Repeated deliberate clicks count as separate feedback; transcript
-observation deduplication remains required before automatic analysis.
+Existing counts remain in OpenChamber's extension storage on the connected
+server; older memories start at zero. Repeated deliberate clicks count as
+separate actions, not independent transcript evidence. Habit does not yet run
+extraction or write a project `habits.json` file. The unused standalone engine
+has been removed; evidence deduplication must be implemented in the real update
+path when extraction is added.
 
 ## Make it yours
 

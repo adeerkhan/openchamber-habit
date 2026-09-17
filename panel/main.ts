@@ -1,4 +1,3 @@
-import { confidenceOf } from './habit-engine';
 import { connectHost } from '@openchamber/sdk';
 import { applyHostReady } from '@openchamber/sdk/ui';
 import type { SessionSnapshot } from '@openchamber/sdk';
@@ -184,7 +183,7 @@ const paint = (): void => {
         `<div><strong>${esc(m.title)}</strong><span style="opacity:0.65;">${badge}</span></div>` +
         (m.detail.trim().length > 0 ? `<div>${esc(m.detail)}</div>` : '') +
         source +
-        `<div>Confidence: ${Math.round(confidenceOf(m.supporting ?? 0, m.contradicting ?? 0) * 100)}% (feedback score, not probability)</div>` +
+        `<div>${m.supporting ?? 0} confirmation${m.supporting === 1 ? '' : 's'} · ${m.contradicting ?? 0} contradiction${m.contradicting === 1 ? '' : 's'}</div>` +
         '<div style="display:flex;gap:6px;margin-top:4px;flex-wrap:wrap;">' +
         '<button data-action="confirm" type="button">Confirm preference</button>' +
         '<button data-action="contradict" type="button">Contradict preference</button>' +
@@ -316,7 +315,7 @@ listView.addEventListener('click', (event) => {
         editDrafts.delete(key);
         editingKey = null;
         await refresh();
-        const reset = meaningChanged ? ' (edit changed the habit\'s meaning — feedback reset to 50%)' : '';
+        const reset = meaningChanged ? ' (edit changed the habit\'s meaning — feedback counts reset)' : '';
         sayAfterRefresh(
           cleaned.redacted ? `Saved with secrets redacted${reset}.` : `Saved${reset}.`,
           'Saved, but refreshing the list failed.',
