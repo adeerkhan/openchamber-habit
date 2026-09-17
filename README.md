@@ -1,8 +1,8 @@
 # Habit
 
 Keep what your agent should remember. A panel extension that captures project
-and global habits, curates them, and inserts them back into the draft. It
-asks for no extension capabilities.
+and global habits, curates them, and inserts them back into the draft.
+The session action requests conversation access. Habit does not use git.
 
 ## Install from GitHub
 
@@ -36,6 +36,21 @@ you save and do not use Habit to store credentials.
    show only in their project. Nothing leaves the machine.
 3. **Recall** — the panel lists what applies here; Insert composes it into
    the draft, Copy takes it to the clipboard. Edit and Forget curate.
+
+## Feedback confidence
+
+**Confirm preference** adds supporting feedback; **Contradict preference** adds
+contradicting feedback without deleting the habit. The displayed score is
+`(1 + supporting) / (2 + supporting + contradicting)`: initially 50%, then
+67% after one confirmation. It is a heuristic feedback score, not a calibrated
+probability that the preference is correct. Insert and Copy never increase it.
+
+Counts persist with each memory in OpenChamber's extension storage on the
+connected server. Older memories start with no recorded feedback. This slice
+does not passively observe conversations, run extraction, or write a project
+`habits.json` file. The standalone engine's file helpers are not wired into the
+panel. Repeated deliberate clicks count as separate feedback; transcript
+observation deduplication remains required before automatic analysis.
 
 ## Make it yours
 
