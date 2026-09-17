@@ -20,18 +20,26 @@ export interface HabitMemory {
   title: string;
   detail: string;
   scope: HabitScope;
-  /** Human label for display; identity uses `directoryHash`. */
+  /** Full project identity; the hash only shortens storage keys. */
   directory: string | null;
   directoryHash: string | null;
   source: HabitSource;
   createdAt: number;
   updatedAt: number;
+  /** Explicit feedback counts; absent on older memories. */
+  supporting?: number;
+  contradicting?: number;
 }
 
 export function readMemory(value: unknown): HabitMemory | null {
   if (value === null || typeof value !== 'object' || Array.isArray(value)) return null;
   const r = value as Record<string, unknown>;
   if (typeof r['id'] !== 'string' || typeof r['title'] !== 'string') return null;
+  const scope: HabitScope | null = r['scope'] === 'project' || r['scope'] === 'global' ? (r['scope'] as HabitScope) : null;
+  if (scope === null) return null;
+  if (scope === 'project' && (typeof r['directory'] !== 'string' || typeof r['directoryHash'] !== 'string')) return null;
+  const directory = typeof r['directory'] === 'string' ? r['directory'] : null;
+  const directoryHash = typeof r['directoryHash'] === 'string' ? r['directoryHash'] : null;
   const source = r['source'] !== null && typeof r['source'] === 'object' && !Array.isArray(r['source'])
     ? (r['source'] as Record<string, unknown>)
     : {};
@@ -40,9 +48,9 @@ export function readMemory(value: unknown): HabitMemory | null {
     id: r['id'],
     title: r['title'],
     detail: typeof r['detail'] === 'string' ? r['detail'] : '',
-    scope: r['scope'] === 'project' ? 'project' : 'global',
-    directory: typeof r['directory'] === 'string' ? r['directory'] : null,
-    directoryHash: typeof r['directoryHash'] === 'string' ? r['directoryHash'] : null,
+    scope,
+    directory,
+    directoryHash,
     source: {
       sessionId: typeof source['sessionId'] === 'string' ? source['sessionId'] : null,
       sessionTitle: typeof source['sessionTitle'] === 'string' ? source['sessionTitle'] : '',
@@ -51,6 +59,8 @@ export function readMemory(value: unknown): HabitMemory | null {
     },
     createdAt: typeof r['createdAt'] === 'number' ? r['createdAt'] : 0,
     updatedAt: typeof r['updatedAt'] === 'number' ? r['updatedAt'] : 0,
+    ...(Number.isSafeInteger(r['supporting']) && (r['supporting'] as number) >= 0 ? { supporting: r['supporting'] as number } : {}),
+    ...(Number.isSafeInteger(r['contradicting']) && (r['contradicting'] as number) >= 0 ? { contradicting: r['contradicting'] as number } : {}),
   };
 }
 
@@ -122,9 +132,8 @@ export function visibleForDirectory(
   memories: ReadonlyArray<HabitMemory>,
   directory: string | null,
 ): Array<HabitMemory> {
-  const hash = directory === null ? null : hashDirectory(directory);
   return memories
-    .filter((m) => m.scope === 'global' || (hash !== null && m.directoryHash === hash))
+    .filter((m) => m.scope === 'global' || (directory !== null && m.directory === directory))
     .sort((a, b) => b.updatedAt - a.updatedAt);
 }
 

@@ -32,9 +32,14 @@ describe('stored memories', () => {
     expect(readMemory(JSON.parse(JSON.stringify(memory)))).toEqual(memory);
   });
 
+  test('invalid scopes and incomplete project identities are rejected', () => {
+    for (const scope of [undefined, null, 'invalid']) expect(readMemory({ ...mem(), scope })).toBeNull();
+    expect(readMemory(mem({ scope: 'project' }))).toBeNull();
+  });
+
   test('missing or malformed sources have safe defaults', () => {
     for (const source of [undefined, null, [], 'invalid', { sessionId: 12, role: 'system' }]) {
-      expect(readMemory({ id: 'h_1', title: 'Tabs', source })?.source).toEqual(mem().source);
+      expect(readMemory({ id: 'h_1', title: 'Tabs', scope: 'global', source })?.source).toEqual(mem().source);
     }
     for (const value of [null, [], 'invalid', {}, { id: 1, title: 'Tabs' }]) {
       expect(readMemory(value)).toBeNull();
@@ -102,8 +107,9 @@ describe('visibleForDirectory', () => {
   test('globals plus own directory, newest first', () => {
     const list = [
       mem({ id: 'g', scope: 'global', updatedAt: 1 }),
-      mem({ id: 'mine', scope: 'project', directoryHash: hashDirectory('/a'), updatedAt: 3 }),
-      mem({ id: 'theirs', scope: 'project', directoryHash: hashDirectory('/b'), updatedAt: 5 }),
+      mem({ id: 'mine', scope: 'project', directory: '/a', directoryHash: hashDirectory('/a'), updatedAt: 3 }),
+      mem({ id: 'theirs', scope: 'project', directory: '/b', directoryHash: hashDirectory('/b'), updatedAt: 5 }),
+      mem({ id: 'collision', scope: 'project', directory: '/other', directoryHash: hashDirectory('/a'), updatedAt: 6 }),
     ];
     expect(visibleForDirectory(list, '/a').map((m) => m.id)).toEqual(['mine', 'g']);
     expect(visibleForDirectory(list, null).map((m) => m.id)).toEqual(['g']);
