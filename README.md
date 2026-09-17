@@ -37,7 +37,8 @@ you save and do not use Habit to store credentials.
    Every memory carries its source session so provenance never gets lost.
 2. **Store** — host namespaced storage, keyed by a short hash of the project
    directory plus per-memory ids. Globals show everywhere; project habits
-   show only in their project. Nothing leaves the machine.
+   show only in their project. Memories live on the connected OpenChamber
+   server, which may be remote; this version makes no extraction-model calls.
 3. **Recall** — the panel lists what applies here; Insert composes it into
    the draft, Copy takes it to the clipboard. Edit and Forget curate.
 
