@@ -196,7 +196,7 @@ const paint = (): void => {
     .join('');
   listView.innerHTML =
     '<h2 style="font-size:13px;margin:0 0 4px;">Habits</h2>' +
-    (rows === '' ? '<p style="margin:0;">Nothing kept yet.</p>' : rows);
+    (rows === '' ? '<p style="margin:0;">Nothing kept yet. Use “Remember as habit” on a message, or /remember title.</p>' : rows);
 };
 
 const readCapture = (): { title: string; detail: string; scope: HabitScope } => {
@@ -207,6 +207,13 @@ const readCapture = (): { title: string; detail: string; scope: HabitScope } => 
     : 'project') as HabitScope;
   return { title, detail, scope };
 };
+
+// A stale "give the habit a title first" must not haunt the panel: typing
+// clears the transient notice. (Nothing else auto-clears notices.)
+captureView.addEventListener('input', (event) => {
+  const field = event.target as HTMLElement | null;
+  if (field?.getAttribute('data-field') === 'title') noticeView.textContent = '';
+});
 
 captureView.addEventListener('click', (event) => {
   const target = event.target as HTMLElement | null;

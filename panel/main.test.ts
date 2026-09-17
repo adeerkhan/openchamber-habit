@@ -14,6 +14,7 @@ test('capture inputs survive ready refresh and context repaints', async () => {
   let listClick: (event: any) => void;
   let listInput: (event: any) => void;
   let captureClick: (event: any) => void;
+  let captureInput: (event: any) => void;
   let listHtml = '';
   const editFields = new Map<string, { value: string }>();
   let failKeys = false;
@@ -55,7 +56,10 @@ test('capture inputs survive ready refresh and context repaints', async () => {
     if (name === 'click') listClick = handler;
     if (name === 'input') listInput = handler;
   }) as typeof list.addEventListener;
-  capture.addEventListener = ((_name: string, handler: (event: any) => void) => { captureClick = handler; }) as typeof capture.addEventListener;
+  capture.addEventListener = ((name: string, handler: (event: any) => void) => {
+    if (name === 'click') captureClick = handler;
+    if (name === 'input') captureInput = handler;
+  }) as typeof capture.addEventListener;
   const rowFor = (key: string) => ({
     getAttribute: (name: string) => name === 'data-key' ? key : key.split(':').at(-1),
     querySelector: (selector: string) => editFields.get(selector),
@@ -142,6 +146,18 @@ test('capture inputs survive ready refresh and context repaints', async () => {
     await settle();
     await expect(Promise.resolve().then(() => callbacks.resolve({ command: 'forget', args: 'Other project only' }))).rejects.toThrow('No habit');
     expect(stored.has(foreignKey)).toBe(true);
+
+    // The "title first" validation must clear when the user starts typing.
+    capture.querySelector('[data-field="title"]').value = '';
+    captureClick({ target: { getAttribute: () => 'save' } });
+    await settle();
+    expect(views.get('[data-view="notice"]')!.textContent).toBe('Give the habit a title first.');
+    capture.querySelector('[data-field="title"]').value = 'N';
+    captureInput({ target: { getAttribute: (a: string) => (a === 'data-field' ? 'title' : null), value: 'N' } });
+    expect(views.get('[data-view="notice"]')!.textContent).toBe('');
+    // Restore the draft the following action-provenance scenario expects.
+    capture.querySelector('[data-field="title"]').value = 'Unfinished title';
+
 
     const item = { kind: 'message', action: 'remember-message', directory: '/source', sessionId: 'source-session', sessionTitle: 'Source', messageId: 'message', role: 'assistant', text: 'Original' };
     callbacks.item(item);
