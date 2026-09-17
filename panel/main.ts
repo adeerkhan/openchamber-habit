@@ -8,7 +8,8 @@ import {
   keyForMemory,
   newMemoryId,
   parseRememberArgs,
-  redactSecrets,
+  readMemory,
+  cleanMemoryInput,
   visibleForDirectory,
   type HabitMemory,
   type HabitScope,
@@ -34,6 +35,18 @@ const captureView = root.querySelector('[data-view="capture"]') as HTMLElement;
 const listView = root.querySelector('[data-view="list"]') as HTMLElement;
 const noticeView = root.querySelector('[data-view="notice"]') as HTMLElement;
 
+// The capture form renders once: repainting it would wipe typed input on
+// every session switch, refresh, and action prefill.
+captureView.innerHTML =
+  '<h2 style="font-size:13px;margin:0 0 4px;">Keep a habit</h2>' +
+  '<div style="display:grid;gap:6px;">' +
+  '<input data-field="title" placeholder="Title — e.g. tabs, not spaces" style="width:100%;box-sizing:border-box;" />' +
+  '<textarea data-field="detail" rows="2" placeholder="Detail (optional)" style="width:100%;box-sizing:border-box;"></textarea>' +
+  '<div style="display:flex;gap:6px;">' +
+  '<select data-field="scope"><option value="project">This project</option><option value="global">Everywhere</option></select>' +
+  '<button data-action="save" type="button">Remember</button>' +
+  '</div></div>';
+
 let directory: string | null = null;
 let session: SessionSnapshot | null = null;
 let memories: Array<HabitMemory> = [];
@@ -41,28 +54,6 @@ let editingId: string | null = null;
 
 const say = (text: string): void => {
   noticeView.textContent = text;
-};
-
-const readMemory = (value: unknown): HabitMemory | null => {
-  if (value === null || typeof value !== 'object' || Array.isArray(value)) return null;
-  const r = value as Record<string, unknown>;
-  if (typeof r['id'] !== 'string' || typeof r['title'] !== 'string') return null;
-  return {
-    id: r['id'] as string,
-    title: r['title'] as string,
-    detail: typeof r['detail'] === 'string' ? (r['detail'] as string) : '',
-    scope: r['scope'] === 'project' ? 'project' : 'global',
-    directory: typeof r['directory'] === 'string' ? (r['directory'] as string) : null,
-    directoryHash: typeof r['directoryHash'] === 'string' ? (r['directoryHash'] as string) : null,
-    source: {
-      sessionId: null,
-      sessionTitle: '',
-      messageId: null,
-      role: null,
-    },
-    createdAt: typeof r['createdAt'] === 'number' ? (r['createdAt'] as number) : 0,
-    updatedAt: typeof r['updatedAt'] === 'number' ? (r['updatedAt'] as number) : 0,
-  };
 };
 
 const refresh = async (): Promise<void> => {
@@ -89,8 +80,8 @@ const saveMemory = async (input: {
   scope: HabitScope;
   source: HabitMemory['source'];
 }): Promise<boolean> => {
-  const title = input.title.trim();
-  if (title.length === 0) {
+  const cleaned = cleanMemoryInput(input.title, input.detail);
+  if (cleaned.title.length === 0) {
     say('Give the habit a title first.');
     return false;
   }
@@ -99,16 +90,11 @@ const saveMemory = async (input: {
     say('No project open; save as global instead.');
     return false;
   }
-  const cleanedTitle = redactSecrets(title);
-  const cleanedDetail = redactSecrets(input.detail.slice(0, 4000));
-  if (cleanedTitle.redacted || cleanedDetail.redacted) {
-    say('Saved with secrets redacted. Secrets never enter Habit storage.');
-  }
   const now = Date.now();
   const memory: HabitMemory = {
     id: newMemoryId(),
-    title: cleanedTitle.text,
-    detail: cleanedDetail.text,
+    title: cleaned.title,
+    detail: cleaned.detail,
     scope: input.scope,
     directory: input.scope === 'project' ? directory : null,
     directoryHash: dirHash,
@@ -123,6 +109,7 @@ const saveMemory = async (input: {
     return false;
   }
   await refresh();
+  say(cleaned.redacted ? 'Kept with recognized secrets redacted.' : 'Kept.');
   return true;
 };
 
@@ -132,16 +119,6 @@ const paint = (): void => {
   const globalCount = visible.filter((m) => m.scope === 'global').length;
   countsView.innerHTML =
     `<p style="margin:0;">${visible.length} habits here · ${projectCount} this project · ${globalCount} global</p>`;
-
-  captureView.innerHTML =
-    '<h2 style="font-size:13px;margin:0 0 4px;">Keep a habit</h2>' +
-    '<div style="display:grid;gap:6px;">' +
-    '<input data-field="title" placeholder="Title — e.g. tabs, not spaces" style="width:100%;box-sizing:border-box;" />' +
-    '<textarea data-field="detail" rows="2" placeholder="Detail (optional)" style="width:100%;box-sizing:border-box;"></textarea>' +
-    '<div style="display:flex;gap:6px;">' +
-    '<select data-field="scope"><option value="project">This project</option><option value="global">Everywhere</option></select>' +
-    '<button data-action="save" type="button">Remember</button>' +
-    '</div></div>';
 
   const rows = visible
     .map((m) => {
@@ -183,20 +160,17 @@ const readCapture = (): { title: string; detail: string; scope: HabitScope } => 
   return { title, detail, scope };
 };
 
-const emptySource = (sessionTitle: string): HabitMemory['source'] => ({
-  sessionId: session?.id ?? null,
-  sessionTitle,
-  messageId: null,
-  role: null,
-});
-
 captureView.addEventListener('click', (event) => {
   const target = event.target as HTMLElement | null;
   if (target?.getAttribute('data-action') !== 'save') return;
   const { title, detail, scope } = readCapture();
   void (async () => {
-    const ok = await saveMemory({ title, detail, scope, source: emptySource(session?.title ?? '') });
-    if (ok) say('Kept.');
+    await saveMemory({
+      title,
+      detail,
+      scope,
+      source: { sessionId: session?.id ?? null, sessionTitle: session?.title ?? '', messageId: null, role: null },
+    });
   })();
 });
 
@@ -227,24 +201,24 @@ listView.addEventListener('click', (event) => {
       editingId = null;
       paint();
     } else if (action === 'edit-save') {
-      const title = (row.querySelector('[data-field="edit-title"]') as HTMLInputElement | null)?.value ?? '';
-      const detail = (row.querySelector('[data-field="edit-detail"]') as HTMLTextAreaElement | null)?.value ?? '';
-      if (title.trim().length === 0) {
+      const cleaned = cleanMemoryInput(
+        (row.querySelector('[data-field="edit-title"]') as HTMLInputElement | null)?.value ?? '',
+        (row.querySelector('[data-field="edit-detail"]') as HTMLTextAreaElement | null)?.value ?? '',
+      );
+      if (cleaned.title.length === 0) {
         say('A habit needs a title.');
         return;
       }
-      const cleanedTitle = redactSecrets(title);
-      const cleanedDetail = redactSecrets(detail.slice(0, 4000));
       const next: HabitMemory = {
         ...memory,
-        title: cleanedTitle.text,
-        detail: cleanedDetail.text,
+        title: cleaned.title,
+        detail: cleaned.detail,
         updatedAt: Date.now(),
       };
       await host.storage.set(keyForMemory(next), JSON.parse(JSON.stringify(next)));
       editingId = null;
       await refresh();
-      say(cleanedTitle.redacted || cleanedDetail.redacted ? 'Saved with secrets redacted.' : 'Saved.');
+      say(cleaned.redacted ? 'Saved with secrets redacted.' : 'Saved.');
     }
   })().catch(() => say('That failed.'));
 });
@@ -292,10 +266,9 @@ host.onResolve((request) => {
       title,
       detail,
       scope: directory !== null ? 'project' : 'global',
-      source: emptySource(session?.title ?? ''),
+      source: { sessionId: session?.id ?? null, sessionTitle: session?.title ?? '', messageId: null, role: null },
     }).then((ok) => {
       if (!ok) throw new Error('Could not keep that.');
-      say(`Kept “${title}”.`);
       return null;
     });
   }

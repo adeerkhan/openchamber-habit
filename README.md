@@ -23,8 +23,9 @@ updates** in Settings → Extensions.
 3. Back in the panel, press **Insert** on a habit to append it to your draft.
 4. `/habits` counts what is kept here; `/forget <title>` drops one.
 
-Secrets are redacted before anything reaches storage, and the panel says so
-out loud when it happens.
+Habit redacts recognized secret patterns in titles and details before saving
+and reports when it does. This is best-effort, not a guarantee: review what
+you save and do not use Habit to store credentials.
 
 ## How it works
 
@@ -48,5 +49,5 @@ npm install
 npm run build
 ```
 
-`openchamber-token-speed.md` next to it is an older native-indicator spec,
-kept as a design record; this extension does not depend on it.
+[The archived Token Speed specification](docs/openchamber-token-speed.md)
+is kept as a design record; this extension does not depend on it.

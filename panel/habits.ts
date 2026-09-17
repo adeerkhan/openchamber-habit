@@ -28,6 +28,39 @@ export interface HabitMemory {
   updatedAt: number;
 }
 
+export function readMemory(value: unknown): HabitMemory | null {
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) return null;
+  const r = value as Record<string, unknown>;
+  if (typeof r['id'] !== 'string' || typeof r['title'] !== 'string') return null;
+  const source = r['source'] !== null && typeof r['source'] === 'object' && !Array.isArray(r['source'])
+    ? (r['source'] as Record<string, unknown>)
+    : {};
+  const role = source['role'];
+  return {
+    id: r['id'],
+    title: r['title'],
+    detail: typeof r['detail'] === 'string' ? r['detail'] : '',
+    scope: r['scope'] === 'project' ? 'project' : 'global',
+    directory: typeof r['directory'] === 'string' ? r['directory'] : null,
+    directoryHash: typeof r['directoryHash'] === 'string' ? r['directoryHash'] : null,
+    source: {
+      sessionId: typeof source['sessionId'] === 'string' ? source['sessionId'] : null,
+      sessionTitle: typeof source['sessionTitle'] === 'string' ? source['sessionTitle'] : '',
+      messageId: typeof source['messageId'] === 'string' ? source['messageId'] : null,
+      role: role === 'user' || role === 'assistant' ? role : null,
+    },
+    createdAt: typeof r['createdAt'] === 'number' ? r['createdAt'] : 0,
+    updatedAt: typeof r['updatedAt'] === 'number' ? r['updatedAt'] : 0,
+  };
+}
+
+/** Shared preparation for create and edit. Redaction is best-effort. */
+export function cleanMemoryInput(title: string, detail: string): { title: string; detail: string; redacted: boolean } {
+  const cleanedTitle = redactSecrets(title.trim());
+  const cleanedDetail = redactSecrets(detail);
+  return { title: cleanedTitle.text, detail: cleanedDetail.text.slice(0, 4000), redacted: cleanedTitle.redacted || cleanedDetail.redacted };
+}
+
 export const HABIT_KEY_PREFIX = 'habit:';
 
 /** Short stable hash for directory namespacing (storage keys cap at 128 chars). */

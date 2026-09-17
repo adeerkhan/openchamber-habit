@@ -1,5 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import {
+  cleanMemoryInput,
+  readMemory,
   formatForCompose,
   HABIT_KEY_PREFIX,
   hashDirectory,
@@ -22,6 +24,38 @@ const mem = (over: Partial<HabitMemory> = {}): HabitMemory => ({
   createdAt: 1,
   updatedAt: 1,
   ...over,
+});
+
+describe('stored memories', () => {
+  test('source metadata survives a storage round trip', () => {
+    const memory = mem({ source: { sessionId: 's', sessionTitle: 'Fix', messageId: 'm', role: 'assistant' } });
+    expect(readMemory(JSON.parse(JSON.stringify(memory)))).toEqual(memory);
+  });
+
+  test('missing or malformed sources have safe defaults', () => {
+    for (const source of [undefined, null, [], 'invalid', { sessionId: 12, role: 'system' }]) {
+      expect(readMemory({ id: 'h_1', title: 'Tabs', source })?.source).toEqual(mem().source);
+    }
+    for (const value of [null, [], 'invalid', {}, { id: 1, title: 'Tabs' }]) {
+      expect(readMemory(value)).toBeNull();
+    }
+  });
+});
+
+describe('cleanMemoryInput', () => {
+  test('trims titles and limits details for both save paths', () => {
+    expect(cleanMemoryInput('  Tabs  ', 'x'.repeat(4001))).toEqual({
+      title: 'Tabs', detail: 'x'.repeat(4000), redacted: false,
+    });
+    expect(cleanMemoryInput('   ', '').title).toBe('');
+  });
+
+  test('redacts before truncating, including long private key blocks', () => {
+    const detail = '-----BEGIN RSA PRIVATE KEY-----\n' + 'x'.repeat(4100) + '\n-----END RSA PRIVATE KEY-----';
+    expect(cleanMemoryInput('ghp_abcdefghijklmnopqrstuvwx', detail)).toEqual({
+      title: '[redacted]', detail: '[redacted]', redacted: true,
+    });
+  });
 });
 
 describe('keys', () => {
