@@ -14,15 +14,11 @@
         "name": "Token Speed",
         "icon": "icon.svg",
         "entry": "panel/index.html"
-      },
-      "capabilities": [
-        "sessions"
-      ]
+      }
     }
   },
   "scripts": {
-    "build": "bun ../openchamber/packages/sdk/scripts/bundle-guest.ts panel/main.ts panel/main.js",
-    "build:package": "npm run build"
+    "build": "openchamber-guest-bundle panel/main.ts panel/main.js"
   },
   "dependencies": {
     "@openchamber/sdk": "1.24.0"
