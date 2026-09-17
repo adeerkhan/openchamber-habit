@@ -1,0 +1,30 @@
+{
+  "name": "openchamber-tps",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Token Speed panel extension for OpenChamber: live turn status for the current session.",
+  "openchamber": {
+    "apiVersion": 1,
+    "engines": {
+      "openchamber": ">=1.22.0"
+    },
+    "contributes": {
+      "panel": {
+        "id": "token-speed",
+        "name": "Token Speed",
+        "icon": "icon.svg",
+        "entry": "panel/index.html"
+      },
+      "capabilities": [
+        "sessions"
+      ]
+    }
+  },
+  "scripts": {
+    "build": "bun ../openchamber/packages/sdk/scripts/bundle-guest.ts panel/main.ts panel/main.js",
+    "build:package": "npm run build"
+  },
+  "dependencies": {
+    "@openchamber/sdk": "1.24.0"
+  }
+}
