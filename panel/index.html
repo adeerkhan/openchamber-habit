@@ -6,6 +6,36 @@
     <style>
       html, body { margin: 0; height: 100%; }
       #root { height: 100%; font-family: system-ui, sans-serif; }
+      button {
+        font: inherit; padding: 4px 10px; cursor: pointer;
+        border-radius: var(--oc-radius, 6px);
+        border: 1px solid var(--oc-border, #3a4354);
+        background: var(--oc-elevated, #1a2230);
+        color: var(--oc-fg, #e6ebf2);
+      }
+      button:hover { background: var(--oc-hover, #232c3e); }
+      button:focus-visible { outline: 2px solid var(--oc-focus, #6ea8fe); outline-offset: 1px; }
+      button.primary {
+        background: var(--oc-primary, #3b82f6); border-color: transparent;
+        color: var(--oc-primary-fg, #fff);
+      }
+      button.primary:hover { filter: brightness(1.12); background: var(--oc-primary, #3b82f6); }
+      button.danger {
+        background: transparent;
+        border-color: color-mix(in srgb, var(--oc-error, #b44747) 55%, transparent);
+        color: var(--oc-error-text, #ff8a8a);
+      }
+      button.danger:hover { background: var(--oc-error, #b44747); color: var(--oc-primary-fg, #fff); }
+      input, textarea, select {
+        font: inherit; padding: 5px 8px;
+        border-radius: var(--oc-radius, 6px);
+        border: 1px solid var(--oc-border, #3a4354);
+        background: var(--oc-bg, #0d1420);
+        color: var(--oc-fg, #e6ebf2);
+      }
+      input:focus-visible, textarea:focus-visible, select:focus-visible {
+        outline: 1px solid var(--oc-focus, #6ea8fe); outline-offset: 0;
+      }
     </style>
   </head>
   <body>

@@ -44,7 +44,7 @@ captureView.innerHTML =
   '<textarea data-field="detail" rows="2" placeholder="Detail (optional)" style="width:100%;box-sizing:border-box;"></textarea>' +
   '<div style="display:flex;gap:6px;">' +
   '<select data-field="scope"><option value="project">This project</option><option value="global">Everywhere</option></select>' +
-  '<button data-action="save" type="button">Remember</button>' +
+  '<button data-action="save" type="button" class="primary">Remember</button>' +
   '</div></div>';
 
 let directory: string | null = null;
@@ -196,7 +196,7 @@ const paint = (): void => {
     .join('');
   listView.innerHTML =
     '<h2 style="font-size:13px;margin:0 0 4px;">Habits</h2>' +
-    (rows === '' ? '<p style="margin:0;">Nothing kept yet. Use “Remember as habit” on a message, or /remember title.</p>' : rows);
+    (rows === '' ? '<p style="margin:0;">Nothing kept yet.</p>' : rows);
 };
 
 const readCapture = (): { title: string; detail: string; scope: HabitScope } => {

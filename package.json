@@ -1,6 +1,6 @@
 {
   "name": "openchamber-habit",
-  "version": "0.1.1",
+  "version": "0.1.3",
   "private": true,
   "description": "Habit: keep what your agent should remember. Project and global memory for OpenChamber sessions.",
   "openchamber": {
