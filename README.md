@@ -1,64 +1,52 @@
-# Token Speed
+# Habit
 
-A panel extension that shows the current OpenChamber session, whether it is
-working, and how long its turns take. It asks for no extension capabilities.
-
-## Features
-
-- **Live session status** — follows the open session's title, model, and
-  working/idle state without any approval prompts. Green dot idle, pulsing
-  amber dot working.
-- **Turn timing** — each finished turn reports its duration and outcome in
-  green/red, borrowing pi-token-speed's speed-tier palette.
-- **Zero capabilities** — context pushes only, so install shows no approval
-  screen and nothing leaves the sandbox.
+Keep what your agent should remember. A panel extension that captures project
+and global habits, curates them, and inserts them back into the draft. It
+asks for no extension capabilities.
 
 ## Install from GitHub
 
 1. Open OpenChamber → **Settings → Extensions**.
 2. In **Folder, ZIP, or URL**, paste this repository's public link:
-   `https://github.com/adeerkhan/openchamber-tps.git`
-3. Press **add**, then open the **Token Speed** panel from the context rail.
+   `https://github.com/adeerkhan/openchamber-habit.git`
+3. Press **add**, then open the **Habit** panel from the context rail.
 
 To update later, bump `version` in `package.json` and use **check for
 updates** in Settings → Extensions.
 
 ## Try it
 
-1. Open any session. The panel shows its title, model, and state.
-2. Send a prompt. The panel flips to working, then reports the turn time.
-3. The Tokens section is honest about the platform limit: SDK v1 does not
-   expose per-message token counts to extensions, so live tok/s lives in the
-   native status-bar indicator, not here.
+1. In any session, run the message action **Remember as habit** on something
+   worth keeping. The panel opens with the form prefilled — add a title.
+2. Or type `/remember tabs, not spaces | enforced by .editorconfig` in the
+   composer.
+3. Back in the panel, press **Insert** on a habit to append it to your draft.
+4. `/habits` counts what is kept here; `/forget <title>` drops one.
+
+Secrets are redacted before anything reaches storage, and the panel says so
+out loud when it happens.
 
 ## How it works
 
-1. **Panel opens** — `connectHost` says hello; `onReady` paints the theme,
-   directory, and current session.
-2. **Session changes** — `onSession` repaints the card for the newly
-   selected session.
-3. **Turn runs** — the host posts `session-lifecycle` phases; `started`
-   begins the clock, `completed`/`failure` stops it and records the outcome.
-4. **Tokens stay out** — throughput needs streamed deltas plus authoritative
-   provider counts, neither of which the guest sandbox receives. The design
-   (rolling estimate snapped to authoritative totals) is specified in
-   `openchamber-token-speed.md` for the native indicator.
+1. **Capture** — session/message actions, `/remember`, or the panel form.
+   Every memory carries its source session so provenance never gets lost.
+2. **Store** — host namespaced storage, keyed by a short hash of the project
+   directory plus per-memory ids. Globals show everywhere; project habits
+   show only in their project. Nothing leaves the machine.
+3. **Recall** — the panel lists what applies here; Insert composes it into
+   the draft, Copy takes it to the clipboard. Edit and Forget curate.
 
 ## Make it yours
 
-`panel/main.ts` is the whole panel: three subscriptions, plain DOM, no
-framework. The checked-in `panel/main.js` is its built bundle — installation
-never builds source. Rebuild after editing:
+`panel/habits.ts` is the pure memory logic (keys, redaction, matching,
+formatting) with `panel/habits.test.ts` beside it (`bun test panel`).
+`panel/main.ts` is the whole panel. The checked-in `panel/main.js` is its
+built bundle — installation never builds source. Rebuild after editing:
 
 ```sh
 npm install
 npm run build
 ```
 
-## Acknowledgments
-
-Throughput design learned from
-[pi-token-speed](https://github.com/gsanhueza/pi-token-speed): estimate over
-a rolling window, snap totals to authoritative counts at turn end, and treat
-buffered flushes as stalls rather than miracles. Its TTFT and end-of-stream
-average ideas are recorded in the spec as follow-ups.
+`openchamber-token-speed.md` next to it is an older native-indicator spec,
+kept as a design record; this extension does not depend on it.

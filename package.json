@@ -1,8 +1,8 @@
 {
-  "name": "openchamber-tps",
-  "version": "1.0.0",
+  "name": "openchamber-habit",
+  "version": "0.1.0",
   "private": true,
-  "description": "Token Speed panel extension for OpenChamber: live turn status for the current session.",
+  "description": "Habit: keep what your agent should remember. Project and global memory for OpenChamber sessions.",
   "openchamber": {
     "apiVersion": 1,
     "engines": {
@@ -10,11 +10,42 @@
     },
     "contributes": {
       "panel": {
-        "id": "token-speed",
-        "name": "Token Speed",
+        "id": "habit",
+        "name": "Habit",
         "icon": "icon.svg",
         "entry": "panel/index.html"
-      }
+      },
+      "commands": [
+        {
+          "name": "remember",
+          "description": "Keep this as a habit: /remember title | optional detail"
+        },
+        {
+          "name": "forget",
+          "description": "Forget a habit by id prefix or title"
+        },
+        {
+          "name": "habits",
+          "description": "Count the habits kept here"
+        }
+      ],
+      "actions": [
+        {
+          "id": "remember-message",
+          "label": "Remember as habit",
+          "icon": "icon.svg",
+          "where": "message"
+        },
+        {
+          "id": "remember-session",
+          "label": "Remember session as habit",
+          "icon": "icon.svg",
+          "where": "session",
+          "payload": [
+            "messages"
+          ]
+        }
+      ]
     }
   },
   "scripts": {
