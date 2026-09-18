@@ -44,7 +44,7 @@ you save and do not use Habit to store credentials.
 
 ## Feedback counts
 
-**Confirm preference** and **Contradict preference** record explicit feedback.
+**Confirm** and **Contradict** record explicit feedback.
 The panel shows counts (for example, “1 confirmation · 0 contradictions”),
 not percentages or estimated preference strength. Insert and Copy never add
 feedback. Editing the habit text resets feedback measured against the old text.

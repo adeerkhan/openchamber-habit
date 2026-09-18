@@ -76,7 +76,7 @@ test('capture inputs survive ready refresh and context repaints', async () => {
     const button = { closest: () => row, getAttribute: () => action };
     listClick({ target: { closest: () => button } });
   };
-  const editingKeyValue = () => listHtml.match(/data-key="([^"]+)" style="border-top[^"]*display:grid/)?.[1] ?? listHtml.match(/data-key="([^"]+)"/)?.[1] ?? '';
+  const editingKeyValue = () => listHtml.match(/data-key="([^"]+)" data-editing="true"/)?.[1] ?? listHtml.match(/data-key="([^"]+)"/)?.[1] ?? '';
   const settle = async () => { for (let i = 0; i < 20; i++) await Promise.resolve(); };
   const root = { innerHTML: '', querySelector: (selector: string) => views.get(selector) };
   const previousDocument = Object.getOwnPropertyDescriptor(globalThis, 'document');

@@ -20,11 +20,11 @@ const root = document.querySelector('#root');
 if (!root) throw new Error('Missing root');
 
 root.innerHTML =
-  '<main style="padding:12px;display:grid;gap:12px;max-width:100%;box-sizing:border-box;">' +
-  '<section data-view="counts"></section>' +
-  '<section data-view="capture"></section>' +
+  '<main class="habit-main">' +
+  '<p class="habit-counts" data-view="counts" role="status"></p>' +
+  '<section class="card" aria-label="Keep a habit"><section data-view="capture"></section></section>' +
   '<section data-view="list"></section>' +
-  '<p data-view="notice" style="margin:0;min-height:1.2em;opacity:0.8;"></p>' +
+  '<p class="notice" data-view="notice" role="status" aria-live="polite"></p>' +
   '</main>';
 
 const esc = (value: string): string =>
@@ -38,12 +38,15 @@ const noticeView = root.querySelector('[data-view="notice"]') as HTMLElement;
 // The capture form renders once: repainting it would wipe typed input on
 // every session switch, refresh, and action prefill.
 captureView.innerHTML =
-  '<h2 style="font-size:13px;margin:0 0 4px;">Keep a habit</h2>' +
-  '<div style="display:grid;gap:6px;">' +
-  '<input data-field="title" placeholder="Title — e.g. tabs, not spaces" style="width:100%;box-sizing:border-box;" />' +
-  '<textarea data-field="detail" rows="2" placeholder="Detail (optional)" style="width:100%;box-sizing:border-box;"></textarea>' +
-  '<div style="display:flex;gap:6px;">' +
-  '<select data-field="scope"><option value="project">This project</option><option value="global">Everywhere</option></select>' +
+  '<h2 class="habit-section-title">Keep a habit</h2>' +
+  '<div class="capture-grid">' +
+  '<label class="field-label" for="habit-title">Title</label>' +
+  '<input id="habit-title" data-field="title" placeholder="Title — e.g. tabs, not spaces" style="width:100%;box-sizing:border-box;" />' +
+  '<label class="field-label" for="habit-detail">Detail</label>' +
+  '<textarea id="habit-detail" data-field="detail" rows="2" placeholder="Detail (optional)" style="width:100%;box-sizing:border-box;"></textarea>' +
+  '<div class="capture-row">' +
+  '<label class="field-label" for="habit-scope">Scope</label>' +
+  '<select id="habit-scope" data-field="scope"><option value="project">This project</option><option value="global">Everywhere</option></select>' +
   '<button data-action="save" type="button" class="primary">Remember</button>' +
   '</div></div>';
 
@@ -160,8 +163,7 @@ const paint = (): void => {
   const visible = visibleForDirectory(memories, directory);
   const projectCount = visible.filter((m) => m.scope === 'project').length;
   const globalCount = visible.filter((m) => m.scope === 'global').length;
-  countsView.innerHTML =
-    `<p style="margin:0;">${visible.length} habits here · ${projectCount} this project · ${globalCount} global</p>`;
+  countsView.innerHTML = esc(`${visible.length} habits here · ${projectCount} this project · ${globalCount} global`);
 
   const rows = visible
     .map((m) => {
@@ -169,34 +171,40 @@ const paint = (): void => {
       const draft = editingKey === key ? editDrafts.get(key) : undefined;
       if (editingKey === key) {
         return (
-          `<div data-key="${esc(key)}" style="border-top:1px solid currentColor;padding:6px 0;opacity:0.9;display:grid;gap:6px;">` +
-          `<input data-field="edit-title" value="${esc(draft?.title ?? m.title)}" style="width:100%;box-sizing:border-box;" />` +
-          `<textarea data-field="edit-detail" rows="2" style="width:100%;box-sizing:border-box;">${esc(draft?.detail ?? m.detail)}</textarea>` +
-          '<div style="display:flex;gap:6px;"><button data-action="edit-save" type="button">Save</button>' +
-          '<button data-action="edit-cancel" type="button">Cancel</button></div></div>'
+          `<article class="card" data-key="${esc(key)}" data-editing="true">` +
+          `<div class="capture-grid">` +
+          `<label class="field-label">Title</label>` +
+          `<input data-field="edit-title" value="${esc(draft?.title ?? m.title)}" style="width:100%;box-sizing:border-box;" aria-label="Edit title" />` +
+          `<label class="field-label">Detail</label>` +
+          `<textarea data-field="edit-detail" rows="2" style="width:100%;box-sizing:border-box;" aria-label="Edit detail">${esc(draft?.detail ?? m.detail)}</textarea>` +
+          '<div class="actions"><button data-action="edit-save" type="button" class="primary sm">Save</button>' +
+          '<button data-action="edit-cancel" type="button" class="ghost sm">Cancel</button></div></div></article>'
         );
       }
-      const source = m.source.sessionTitle.length > 0 ? `<div style="opacity:0.65;">kept from “${esc(m.source.sessionTitle)}”</div>` : '';
-      const badge = m.scope === 'project' ? ' · this project' : ' · global';
+      const source = m.source.sessionTitle.length > 0 ? `<div class="habit-meta">kept from “${esc(m.source.sessionTitle)}”</div>` : '';
+      const badge = m.scope === 'project'
+        ? '<span class="badge project">this project</span>'
+        : '<span class="badge">global</span>';
       return (
-        `<div data-key="${esc(key)}" style="border-top:1px solid currentColor;padding:6px 0;opacity:0.9;">` +
-        `<div><strong>${esc(m.title)}</strong><span style="opacity:0.65;">${badge}</span></div>` +
-        (m.detail.trim().length > 0 ? `<div>${esc(m.detail)}</div>` : '') +
+        `<article class="card" data-key="${esc(key)}">` +
+        `<div class="habit-meta">${badge}<span>${m.supporting ?? 0} confirmation${m.supporting === 1 ? '' : 's'} · ${m.contradicting ?? 0} contradiction${m.contradicting === 1 ? '' : 's'}</span></div>` +
+        `<h3 class="habit-title">${esc(m.title)}</h3>` +
+        (m.detail.trim().length > 0 ? `<p class="habit-detail">${esc(m.detail)}</p>` : '') +
         source +
-        `<div>${m.supporting ?? 0} confirmation${m.supporting === 1 ? '' : 's'} · ${m.contradicting ?? 0} contradiction${m.contradicting === 1 ? '' : 's'}</div>` +
-        '<div style="display:flex;gap:6px;margin-top:4px;flex-wrap:wrap;">' +
-        '<button data-action="confirm" type="button">Confirm preference</button>' +
-        '<button data-action="contradict" type="button">Contradict preference</button>' +
-        '<button data-action="insert" type="button">Insert</button>' +
-        '<button data-action="copy" type="button">Copy</button>' +
-        '<button data-action="edit" type="button">Edit</button>' +
-        '<button data-action="delete" type="button">Forget</button></div></div>'
+        '<div class="actions">' +
+        '<button data-action="insert" type="button" class="primary sm">Insert</button>' +
+        '<button data-action="confirm" type="button" class="sm">Confirm</button>' +
+        '<button data-action="contradict" type="button" class="sm">Contradict</button></div>' +
+        '<div class="actions subtle">' +
+        '<button data-action="copy" type="button" class="ghost sm">Copy</button>' +
+        '<button data-action="edit" type="button" class="ghost sm">Edit</button>' +
+        '<button data-action="delete" type="button" class="danger-ghost sm">Forget</button></div></article>'
       );
     })
     .join('');
   listView.innerHTML =
-    '<h2 style="font-size:13px;margin:0 0 4px;">Habits</h2>' +
-    (rows === '' ? '<p style="margin:0;">Nothing kept yet.</p>' : rows);
+    '<h2 class="habit-section-title">Habits</h2><div class="habit-list">' +
+    (rows === '' ? '<p class="empty">Nothing kept yet.</p>' : rows) + '</div>';
 };
 
 const readCapture = (): { title: string; detail: string; scope: HabitScope } => {
