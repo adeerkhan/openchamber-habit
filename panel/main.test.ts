@@ -15,13 +15,22 @@ test('capture inputs survive ready refresh and context repaints', async () => {
   let listInput: (event: any) => void;
   let captureClick: (event: any) => void;
   let captureInput: (event: any) => void;
+  let reviewClick: (event: any) => void;
+  let applyClick: (event: any) => void;
   let listHtml = '';
+  let reviewHtml = '';
+  let applyHtml = '';
   const editFields = new Map<string, { value: string }>();
   let failKeys = false;
   let holdGet: ((key: string, value: any) => Promise<any>) | null = null;
   let holdSet: (() => Promise<void>) | null = null;
   let composeCalls = 0;
   let clipboardCalls = 0;
+  let generateCalls: Array<{ prompt: string; system?: string }> = [];
+  let generateAnswer = '{"candidates":[]}';
+  let toastMessages: string[] = [];
+  let badgeCalls: Array<number | null> = [];
+  let agentsFile: string | null = null;
   const view = (capture = false) => ({
     set innerHTML(_html: string) {
       if (capture) {
@@ -41,9 +50,13 @@ test('capture inputs survive ready refresh and context repaints', async () => {
     ['[data-view="capture"]', capture],
     ['[data-view="counts"]', view()],
     ['[data-view="list"]', view()],
+    ['[data-view="review"]', view()],
+    ['[data-view="apply"]', view()],
     ['[data-view="notice"]', view()],
   ]);
   const list = views.get('[data-view="list"]')!;
+  const review = views.get('[data-view="review"]')!;
+  const apply = views.get('[data-view="apply"]')!;
   Object.defineProperty(list, 'innerHTML', { set(value: string) {
     listHtml = value;
     editFields.clear();
@@ -60,6 +73,14 @@ test('capture inputs survive ready refresh and context repaints', async () => {
     if (name === 'click') captureClick = handler;
     if (name === 'input') captureInput = handler;
   }) as typeof capture.addEventListener;
+  Object.defineProperty(review, 'innerHTML', { set(value: string) { reviewHtml = value; } });
+  Object.defineProperty(apply, 'innerHTML', { set(value: string) { applyHtml = value; } });
+  review.addEventListener = ((name: string, handler: (event: any) => void) => {
+    if (name === 'click') reviewClick = handler;
+  }) as typeof review.addEventListener;
+  apply.addEventListener = ((name: string, handler: (event: any) => void) => {
+    if (name === 'click') applyClick = handler;
+  }) as typeof apply.addEventListener;
   const rowFor = (key: string) => ({
     getAttribute: (name: string) => name === 'data-key' ? key : key.split(':').at(-1),
     querySelector: (selector: string) => editFields.get(selector),
@@ -77,7 +98,16 @@ test('capture inputs survive ready refresh and context repaints', async () => {
     listClick({ target: { closest: () => button } });
   };
   const editingKeyValue = () => listHtml.match(/data-key="([^"]+)" data-editing="true"/)?.[1] ?? listHtml.match(/data-key="([^"]+)"/)?.[1] ?? '';
-  const settle = async () => { for (let i = 0; i < 20; i++) await Promise.resolve(); };
+  const reviewClickAction = (action: string, candidateId: string) => {
+    const row = { getAttribute: (name: string) => (name === 'data-candidate' ? candidateId : null) };
+    const button = { closest: (selector: string) => (selector === '[data-candidate]' ? row : null), getAttribute: () => action };
+    reviewClick({ target: { closest: (selector: string) => (selector === '[data-candidate-action]' ? button : null) } });
+  };
+  const applyClickAction = (action: string) => {
+    const button = { hasAttribute: () => false, getAttribute: () => action };
+    applyClick({ target: { closest: (selector: string) => (selector === '[data-apply-action]' ? button : null) } });
+  };
+  const settle = async () => { for (let i = 0; i < 40; i++) await Promise.resolve(); };
   const root = { innerHTML: '', querySelector: (selector: string) => views.get(selector) };
   const previousDocument = Object.getOwnPropertyDescriptor(globalThis, 'document');
   Object.defineProperty(globalThis, 'document', {
@@ -97,9 +127,21 @@ test('capture inputs survive ready refresh and context repaints', async () => {
       },
       compose: async () => { composeCalls++; },
       writeClipboard: async () => { clipboardCalls++; },
+      toast: async (request: { message: string }) => { toastMessages.push(request.message); },
+      setBadge: async (count: number | null) => { badgeCalls.push(count); },
+      generate: async (request: { prompt: string; system?: string }) => {
+        generateCalls.push({ prompt: request.prompt, system: request.system });
+        return { text: generateAnswer };
+      },
+      readFile: async () => {
+        if (agentsFile === null) throw Object.assign(new Error('missing'), { code: 'NOT_FOUND' });
+        return { content: agentsFile };
+      },
+      writeFile: async (_path: string, content: string) => { agentsFile = content; return { written: true as const }; },
       onReady: (fn: (value: any) => any) => { callbacks.ready = fn; },
       onDirectory: (fn: (value: any) => any) => { callbacks.directory = fn; },
       onSession: (fn: (value: any) => any) => { callbacks.session = fn; },
+      onSessionLifecycle: (fn: (value: any) => any) => { callbacks.lifecycle = fn; },
       onResolve: (fn: (value: any) => any) => { callbacks.resolve = fn; },
       onItem: (fn: (value: any) => any) => { callbacks.item = fn; },
     }),
@@ -269,6 +311,116 @@ test('capture inputs survive ready refresh and context repaints', async () => {
     holdGet = null;
     await forgetting;
     expect(stored.has(twinKey)).toBe(false);
+
+    // --- Step 1: turn-level nudge -----------------------------------------
+    // The SDK emits a session-derived lifecycle event with every `ready`; an
+    // idle snapshot must not count as a turn.
+    callbacks.ready({ directory: '/b', session: { id: 's', title: 'S' }, item: null });
+    callbacks.lifecycle({ sessionId: 's', phase: 'completed' });
+    expect(badgeCalls).toEqual([]);
+    await settle();
+    // Move past the ready-derived-event window: later completions are real turns.
+    const liveNow = Date.now;
+    Date.now = () => liveNow() + 5_000;
+    try {
+      callbacks.lifecycle({ sessionId: 's', phase: 'completed' });
+      callbacks.lifecycle({ sessionId: 's', phase: 'completed' });
+      callbacks.lifecycle({ sessionId: 's', phase: 'failure' });
+      callbacks.lifecycle({ sessionId: 's', phase: 'started' });
+    } finally {
+      Date.now = liveNow;
+    }
+    expect(badgeCalls).toEqual([1, 2]); // failure and started never count
+
+    // --- Step 2: one-click incremental extraction ------------------------
+    callbacks.directory('/b');
+    const sessionItem = {
+      kind: 'session', action: 'remember-session', sessionId: 'sess-analysis', sessionTitle: 'Analysis', directory: '/b',
+      messages: [
+        { id: 'u-1', role: 'user', text: 'I always want tabs', createdAt: 1 },
+        { id: 'a-1', role: 'assistant', text: 'ok', createdAt: 2 },
+      ],
+    };
+    generateAnswer = JSON.stringify({ candidates: [{ title: 'Use tabs', detail: '', evidence: ['u-1'] }] });
+    callbacks.item(sessionItem);
+    await settle();
+    expect(generateCalls).toHaveLength(1);
+    expect(generateCalls[0].prompt).toContain('[id: u-1]');
+    expect(stored.has('analysis:queue:sess-analysis')).toBe(true);
+    expect(reviewHtml).toContain('Use tabs');
+    expect(badgeCalls.at(-1)).toBeNull(); // reviewing clears the badge
+
+    // A `ready` replay of the same item must not run the model again.
+    callbacks.ready({ directory: '/b', session: { id: 'sess-analysis', title: 'Analysis' }, item: { ...sessionItem } });
+    await settle();
+    expect(generateCalls).toHaveLength(1);
+
+    const candidateId = reviewHtml.match(/data-candidate="([^"]+)"/)![1];
+    reviewClickAction('keep', candidateId);
+    await settle();
+    const kept = [...stored.values()].find((memory: any) => memory?.title === 'Use tabs');
+    expect(kept.scope).toBe('project');
+    expect(kept.directory).toBe('/b');
+    expect(kept.source).toEqual({ sessionId: 'sess-analysis', sessionTitle: 'Analysis', messageId: 'u-1', role: 'user' });
+    expect(stored.has('analysis:queue:sess-analysis')).toBe(false);
+    expect(reviewHtml).toBe('');
+
+    // A new turn analyzes only what is new.
+    generateAnswer = JSON.stringify({ candidates: [] });
+    sessionItem.messages.push({ id: 'u-2', role: 'user', text: 'Also named exports', createdAt: 3 });
+    callbacks.item(sessionItem);
+    await settle();
+    expect(generateCalls).toHaveLength(2);
+    expect(generateCalls[1].prompt).toContain('[id: u-2]');
+    expect(generateCalls[1].prompt).not.toContain('[id: u-1]');
+
+    // Re-clicking with nothing new must not call the model again.
+    const realNow = Date.now;
+    const shiftedNow = realNow() + 10_000;
+    Date.now = () => shiftedNow;
+    try {
+      callbacks.item({ ...sessionItem, messages: [...sessionItem.messages] });
+      await settle();
+    } finally {
+      Date.now = realNow;
+    }
+    expect(generateCalls).toHaveLength(2);
+    expect(toastMessages.at(-1)).toContain('Nothing new');
+
+    // A session item with no conversation grant keeps the manual path.
+    callbacks.item({ kind: 'session', action: 'remember-session', sessionId: 'sess-nomsgs', sessionTitle: 'No messages', directory: '/b' });
+    await settle();
+    expect(capture.querySelector('[data-field="title"]').value).toBe('No messages');
+
+    // --- Step 3: apply to AGENTS.md --------------------------------------
+    expect(agentsFile).toBeNull();
+    applyClickAction('preview');
+    await settle();
+    expect(applyHtml).toContain('Add the Habit block');
+    expect(applyHtml).toContain('- Use tabs');
+    expect(agentsFile).toBeNull(); // preview only, no write
+
+    applyClickAction('confirm');
+    await settle();
+    expect(agentsFile).toContain('<!-- habit:start -->');
+    expect(agentsFile).toContain('- Use tabs');
+    expect(stored.has(`analysis:applied:${hashDirectory('/b')}`)).toBe(true);
+
+    // An edit outside the markers stops the next preview.
+    agentsFile = `manual note\n${agentsFile}`;
+    applyClickAction('preview');
+    await settle();
+    expect(applyHtml).toContain('changed outside');
+    expect(agentsFile.startsWith('manual note')).toBe(true);
+
+    // Explicit override previews, and the confirmed write keeps the manual note.
+    applyClickAction('override');
+    await settle();
+    expect(applyHtml).toContain('Replace the Habit block');
+    applyClickAction('confirm');
+    await settle();
+    expect(agentsFile.startsWith('manual note')).toBe(true);
+    expect(agentsFile).toContain('- Use tabs');
   } finally {
     mock.restore();
     if (previousDocument) Object.defineProperty(globalThis, 'document', previousDocument);
