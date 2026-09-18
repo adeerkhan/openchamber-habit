@@ -1,5 +1,8 @@
 # Habit
 
+![version](https://img.shields.io/badge/version-0.2.0-blue)
+![license](https://img.shields.io/badge/license-MIT-green)
+
 Keep what your agent should remember. A panel extension that captures project
 and global habits, curates them, and inserts them back into the draft.
 Requires OpenChamber 1.24.0 or newer. The session action requests conversation
@@ -19,7 +22,8 @@ and every file write follows a click, and every write is previewed first.
 3. Press **add**, then open the **Habit** panel from the context rail.
 
 To update later, bump `version` in `package.json` and use **check for
-updates** in Settings → Extensions.
+updates** in Settings → Extensions. The badge at the top of this file tracks
+that version — `package.json` is the source of truth.
 
 ## Try it
 
@@ -103,9 +107,9 @@ may be committed or synced.
 formatting). `panel/extraction.ts` is the pure extraction/validation logic,
 `panel/import-ledger.ts` parses and validates Vitruvius ledgers, and
 `panel/apply.ts` is the pure AGENTS.md block/diff logic. Each has a test beside
-it (`bun test panel`). `panel/main.ts` is the whole panel. The checked-in
-`panel/main.js` is its built bundle — installation never builds source. Rebuild
-after editing:
+it (`npm test` runs the panel suite plus the manifest check). `panel/main.ts`
+is the whole panel. The checked-in `panel/main.js` is its built bundle —
+installation never builds source. Rebuild after editing:
 
 ```sh
 npm install
