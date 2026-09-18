@@ -8,4 +8,5 @@ test('install manifest declares model/files access and the supported host floor'
   expect(parsed.openchamber.engines?.openchamber).toBe('>=1.24.0');
   expect(manifest.dependencies['@openchamber/sdk']).toBe('1.24.0');
   expect(parsed.openchamber.contributes.actions?.find((action) => action.id === 'remember-session')?.payload).toEqual(['messages']);
+  expect(parsed.openchamber.contributes.commands?.map((command) => command.name)).toContain('habit-import');
 });

@@ -72,38 +72,52 @@ export type AnalyzeOutcome =
   | { status: 'invalid' }
   | { status: 'ok'; queue: StoredReviewQueue };
 
+/**
+ * Prompt version. Bump on any edit to the prompt or the rendered window; a
+ * stored queue's provenance is meaningless if the prompt that produced it has
+ * silently changed. Mirrors the Caveman rewriter's PromptVersion discipline.
+ */
+export const EXTRACTION_PROMPT_VERSION = '2';
+
+/**
+ * Caveman/AgentDiet-shaped extraction prompt: Job, Input, Drop, Output,
+ * Abstain. Rules over prose, compact wire keys, and an explicit empty answer.
+ * Structure is modelled on the Caveman reference in `ref/caveman`
+ * (`rewriter/prompt.go` four-part framing; `skills/caveman-compress` drop/keep
+ * lists). The text is original — the reference prompt is itself a
+ * reconstruction from a published outline, not a copy, so this is too.
+ * Preserve this shape on edits; the Abstain paragraph is load-bearing.
+ */
 export const EXTRACTION_SYSTEM_PROMPT = [
-  'You extract durable working preferences from a transcript between a developer ("user") and a coding assistant.',
+  '## Job',
   '',
-  'A durable preference is a rule the user wants followed in future, unrelated tasks: coding style, naming, formatting, tooling, workflow, or communication. It is a general expectation the user states or insists on.',
+  'Read one window of developer-assistant turns. Extract durable working preferences: rules the user wants applied to future, unrelated tasks — style, naming, formatting, tooling, workflow, communication. Do not solve the task. Do not advise.',
   '',
-  'Never propose:',
-  '- one-off task instructions, such as "rename this", "fix the failing test", or "use X for this file"',
-  '- requests scoped to the current step, file, or repository state',
-  '- generic praise or acknowledgement, such as "thanks", "looks good", or "perfect"',
-  "- the assistant's own choices, suggestions, corrections, or summaries",
-  '- facts about the code or project, even when the user stated them',
-  '- credentials, tokens, keys, personal data, or verbatim quotations',
-  '- anything the user only implied; require an explicit user statement',
-  '- a preference already proposed earlier in this same answer',
+  '## Input',
   '',
-  'Only the user messages are evidence. Assistant messages are context and are never evidence.',
+  'Turns oldest to newest, each `[id: <id>] <role>:`. Only user turns are evidence. Assistant turns are context and are never evidence.',
   '',
-  'Return JSON only, exactly this shape:',
-  '{"candidates":[{"title":"...","detail":"...","evidence":["<message id>"]}]}',
+  '## Drop — never propose',
   '',
-  'Field rules:',
-  '- title: imperative and short, at most 200 characters, for example "Use tabs for indentation".',
-  '- detail: optional specifics, at most 400 characters, or "".',
-  '- evidence: 1 to 3 ids of user messages that state the preference. Ids appear as [id: ...] in the transcript. Never invent an id and never cite an assistant message.',
+  '- task-scoped instruction: "rename this", "fix that test", "use X for this file"',
+  '- request scoped to the current step, file, or repo state',
+  '- praise, acknowledgement, silence: "thanks", "looks good"',
+  "- the assistant's own choices, suggestions, summaries",
+  '- codebase facts, even user-stated',
+  '- secrets, tokens, credentials, personal data, verbatim quotes',
+  '- implied rules; require an explicit user statement',
+  '- a preference already proposed in this same answer',
   '',
-  'Calibration:',
-  '- Most transcripts contain no durable preference. Then return {"candidates":[]}. An empty list is correct, common, and preferred over a guess.',
-  '- A preference stated once is enough; do not require repetition.',
-  '- Prefer fewer, higher-confidence candidates. Never pad the list.',
-  '- If the user reversed a preference later, propose only the final version, or nothing when it is unclear.',
+  '## Output — JSON only, no prose, no fences',
   '',
-  'Do not explain. Output only the JSON object.',
+  '{"c":[{"t":"<imperative rule, <=200 chars>","d":"<specifics, <=400 chars, else empty>","e":["<user-message id>"]}]}',
+  '',
+  '- `e`: 1-3 ids of user turns stating the rule, copied exactly from the window. Never invent an id. Never cite an assistant id.',
+  '- One strong candidate beats three weak. Fewer is better.',
+  '',
+  '## Abstain',
+  '',
+  'Most windows hold no durable preference. Then output exactly {"c":[]}. Empty is the correct, common answer. A guessed or padded list is wrong. A preference stated once is enough. If the user reversed a rule later, emit only the final form, or nothing when unclear.',
 ].join('\n');
 
 /** Prompt cap from the SDK; the window is trimmed to fit. */
@@ -236,10 +250,26 @@ export function parseCandidatesJson(text: string): { value: unknown } | null {
   return null;
 }
 
+/** Compact wire keys (`c`/`t`/`d`/`e`) with the long names still accepted. */
+const pickString = (record: Record<string, unknown>, ...keys: string[]): string | undefined => {
+  for (const key of keys) {
+    if (typeof record[key] === 'string') return record[key] as string;
+  }
+  return undefined;
+};
+
+const pickArray = (record: Record<string, unknown>, ...keys: string[]): unknown[] | undefined => {
+  for (const key of keys) {
+    if (Array.isArray(record[key])) return record[key] as unknown[];
+  }
+  return undefined;
+};
+
 const candidateList = (parsed: unknown): unknown[] | null => {
   if (Array.isArray(parsed)) return parsed;
-  if (parsed !== null && typeof parsed === 'object' && Array.isArray((parsed as Record<string, unknown>)['candidates'])) {
-    return (parsed as Record<string, unknown>)['candidates'] as unknown[];
+  if (parsed !== null && typeof parsed === 'object') {
+    const list = pickArray(parsed as Record<string, unknown>, 'c', 'candidates');
+    if (list) return list;
   }
   return null;
 };
@@ -253,19 +283,21 @@ const readCandidate = (
 ): HabitCandidate | null => {
   if (raw === null || typeof raw !== 'object' || Array.isArray(raw)) return null;
   const record = raw as Record<string, unknown>;
-  if (typeof record['title'] !== 'string') return null;
+  const rawTitle = pickString(record, 't', 'title');
+  if (rawTitle === undefined) return null;
 
-  const title = normalizeTitle(record['title']);
+  const title = normalizeTitle(rawTitle);
   if (title.length === 0 || title.length > TITLE_MAX) return null;
   if (seenTitles.has(title.toLowerCase())) return null;
 
-  const rawDetail = typeof record['detail'] === 'string' ? record['detail'] : '';
+  const rawDetail = pickString(record, 'd', 'detail') ?? '';
   if (rawDetail.length > DETAIL_MAX) return null;
   const detail = redactSecrets(rawDetail.trim()).text;
 
-  if (!Array.isArray(record['evidence']) || record['evidence'].length === 0) return null;
+  const rawEvidence = pickArray(record, 'e', 'evidence');
+  if (!rawEvidence || rawEvidence.length === 0) return null;
   const evidence: CandidateEvidence[] = [];
-  for (const entry of record['evidence']) {
+  for (const entry of rawEvidence) {
     if (typeof entry !== 'string') return null;
     const cited = windowById.get(entry);
     // Existence *and* role are checked against the supplied window: a citation
@@ -286,19 +318,15 @@ export interface ExtractionResult {
 }
 
 /**
- * Validate a model answer against the exact window it was given. A candidate
- * that cites an id outside that window is rejected here, before it can reach
- * the review queue, even if that id exists elsewhere in the transcript.
+ * Validate an already-parsed candidate list against the exact window it cited.
+ * Used by live extraction and by ledger import; both must run the same checks.
+ * A candidate citing an id outside that window is rejected here, before it can
+ * reach the review queue, even if that id exists elsewhere in the transcript.
  */
-export function extractCandidates(
-  text: string,
+export function validateCandidateList(
+  list: ReadonlyArray<unknown>,
   window: ReadonlyArray<AnalysisMessage>,
 ): ExtractionResult {
-  const parsed = parseCandidatesJson(text);
-  if (!parsed) return { ok: false, candidates: [], rejected: 0 };
-  const list = candidateList(parsed.value);
-  if (!list) return { ok: false, candidates: [], rejected: 0 };
-
   const windowById = new Map(window.map((message) => [message.id, message]));
   const seenTitles = new Set<string>();
   const candidates: HabitCandidate[] = [];
@@ -313,6 +341,26 @@ export function extractCandidates(
     candidates.push(candidate);
   }
   return { ok: true, candidates, rejected };
+}
+
+/** Parse a candidate list out of an envelope: a bare array, or `c`/`candidates`. */
+export function candidatesFrom(value: unknown): unknown[] | null {
+  const list = candidateList(value);
+  return list ?? null;
+}
+
+/**
+ * Validate a model answer against the exact window it was given.
+ */
+export function extractCandidates(
+  text: string,
+  window: ReadonlyArray<AnalysisMessage>,
+): ExtractionResult {
+  const parsed = parseCandidatesJson(text);
+  if (!parsed) return { ok: false, candidates: [], rejected: 0 };
+  const list = candidateList(parsed.value);
+  if (!list) return { ok: false, candidates: [], rejected: 0 };
+  return validateCandidateList(list, window);
 }
 
 const readStoredCandidate = (value: unknown): HabitCandidate | null => {

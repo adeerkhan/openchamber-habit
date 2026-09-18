@@ -4,6 +4,7 @@ import type { SessionSnapshot } from '@openchamber/sdk';
 import {
   formatForCompose,
   hashDirectory,
+  hashText,
   isHabitKey,
   keyForMemory,
   newMemoryId,
@@ -20,6 +21,14 @@ import {
   reviewQueueKey,
   type StoredReviewQueue,
 } from './extraction';
+import {
+  IMPORT_TITLE_PREFIX,
+  importQueueKey,
+  importedLedgerKey,
+  isDuplicateTitle,
+  mergeCandidates,
+  parseLedger,
+} from './import-ledger';
 import {
   appliedRecordKey,
   extractHabitBlock,
@@ -39,6 +48,7 @@ root.innerHTML =
   '<p class="habit-counts" data-view="counts" role="status"></p>' +
   '<section class="card" aria-label="Keep a habit"><section data-view="capture"></section></section>' +
   '<section data-view="review" aria-label="Suggested habits"></section>' +
+  '<section class="card" data-view="import" aria-label="Import from Vitruvius"></section>' +
   '<section data-view="list"></section>' +
   '<section class="card" data-view="apply" aria-label="Use in future sessions"></section>' +
   '<p class="notice" data-view="notice" role="status" aria-live="polite"></p>' +
@@ -50,6 +60,7 @@ const esc = (value: string): string =>
 const countsView = root.querySelector('[data-view="counts"]') as HTMLElement;
 const captureView = root.querySelector('[data-view="capture"]') as HTMLElement;
 const reviewView = root.querySelector('[data-view="review"]') as HTMLElement;
+const importView = root.querySelector('[data-view="import"]') as HTMLElement;
 const listView = root.querySelector('[data-view="list"]') as HTMLElement;
 const applyView = root.querySelector('[data-view="apply"]') as HTMLElement;
 const noticeView = root.querySelector('[data-view="notice"]') as HTMLElement;
@@ -68,6 +79,14 @@ captureView.innerHTML =
   '<select id="habit-scope" data-field="scope"><option value="project">This project</option><option value="global">Everywhere</option></select>' +
   '<button data-action="save" type="button" class="primary">Remember</button>' +
   '</div></div>';
+
+// The import form also renders once so a pasted ledger survives repaints.
+importView.innerHTML =
+  '<h2 class="habit-section-title">Import from Vitruvius</h2>' +
+  '<p class="habit-meta">Paste a ledger from a Vitruvius run, or run <code>/habit-import &lt;path&gt;</code>. ' +
+  'Candidates are validated against the window inside the ledger before review.</p>' +
+  '<textarea data-field="ledger" rows="3" placeholder="Paste ledger JSON" style="width:100%;box-sizing:border-box;" aria-label="Ledger JSON"></textarea>' +
+  '<div class="actions"><button data-import-action="import" type="button" class="sm">Import ledger</button></div>';
 
 let directory: string | null = null;
 let session: SessionSnapshot | null = null;
@@ -100,6 +119,9 @@ let lastReadyAt = 0;
 let reviewQueue: StoredReviewQueue | null = null;
 let reviewSessionId: string | null = null;
 let reviewEpoch = 0;
+/** Staged candidates imported from a Vitruvius ledger; scoped to the project. */
+let importQueue: StoredReviewQueue | null = null;
+let importEpoch = 0;
 let analyzing = false;
 let applyPlan: ApplyPlan | null = null;
 let applyConflict: ApplyConflict | null = null;
@@ -255,45 +277,75 @@ const saveMemory = async (input: {
   return result ?? false;
 };
 
+type QueueOrigin = 'session' | 'import';
+
+const reviewSources = (): Array<{ origin: QueueOrigin; queue: StoredReviewQueue }> => {
+  const sources: Array<{ origin: QueueOrigin; queue: StoredReviewQueue }> = [];
+  if (reviewQueue && reviewQueue.candidates.length > 0) sources.push({ origin: 'session', queue: reviewQueue });
+  if (importQueue && importQueue.candidates.length > 0) sources.push({ origin: 'import', queue: importQueue });
+  return sources;
+};
+
+const queueForCandidate = (candidateId: string): { origin: QueueOrigin; queue: StoredReviewQueue } | null =>
+  reviewSources().find((source) => source.queue.candidates.some((candidate) => candidate.id === candidateId)) ?? null;
+
 const paintReview = (): void => {
-  if (!reviewQueue || reviewQueue.candidates.length === 0) {
+  const sources = reviewSources();
+  if (sources.length === 0) {
     reviewView.innerHTML = '';
     return;
   }
-  const scopeBadge = reviewQueue.directory === null
-    ? '<span class="badge">suggested · global</span>'
-    : '<span class="badge project">suggested · this project</span>';
-  const cards = reviewQueue.candidates
-    .map((candidate) => {
-      const alreadyKept = memories.some((m) => m.title.trim().toLowerCase() === candidate.title.trim().toLowerCase());
-      const evidence = candidate.evidence.length;
-      return (
-        `<article class="card" data-candidate="${esc(candidate.id)}">` +
-        `<div class="habit-meta">${scopeBadge}` +
-        `<span>${evidence} user message${evidence === 1 ? '' : 's'}</span>` +
-        (alreadyKept ? '<span>already kept</span>' : '') +
-        '</div>' +
-        `<h3 class="habit-title">${esc(candidate.title)}</h3>` +
-        (candidate.detail.trim().length > 0 ? `<p class="habit-detail">${esc(candidate.detail)}</p>` : '') +
-        '<div class="actions">' +
-        '<button data-candidate-action="keep" type="button" class="primary sm">Keep</button>' +
-        '<button data-candidate-action="dismiss" type="button" class="ghost sm">Dismiss</button>' +
-        '</div></article>'
-      );
-    })
+  const cards = sources
+    .flatMap(({ origin, queue }) =>
+      queue.candidates.map((candidate) => {
+        const alreadyKept = memories.some(
+          (m) => m.title.trim().toLowerCase() === candidate.title.trim().toLowerCase(),
+        );
+        const evidence = candidate.evidence.length;
+        const originBadge = origin === 'import'
+          ? '<span class="badge">imported · Vitruvius</span>'
+          : queue.directory === null
+            ? '<span class="badge">suggested · global</span>'
+            : '<span class="badge project">suggested · this project</span>';
+        return (
+          `<article class="card" data-candidate="${esc(candidate.id)}">` +
+          `<div class="habit-meta">${originBadge}` +
+          `<span>${evidence} user message${evidence === 1 ? '' : 's'}</span>` +
+          (alreadyKept ? '<span>already kept</span>' : '') +
+          '</div>' +
+          `<h3 class="habit-title">${esc(candidate.title)}</h3>` +
+          (candidate.detail.trim().length > 0 ? `<p class="habit-detail">${esc(candidate.detail)}</p>` : '') +
+          '<div class="actions">' +
+          '<button data-candidate-action="keep" type="button" class="primary sm">Keep</button>' +
+          '<button data-candidate-action="dismiss" type="button" class="ghost sm">Dismiss</button>' +
+          '</div></article>'
+        );
+      }),
+    )
     .join('');
-  const omitted = reviewQueue.omitted > 0 || reviewQueue.truncated
-    ? '<p class="habit-meta">Some older messages were left out of the analysis.</p>'
+  const total = sources.reduce((sum, source) => sum + source.queue.candidates.length, 0);
+  const fromParts = sources.map(({ origin, queue }) => origin === 'import'
+    ? `imported${outcomeLabel(queue) ? ` from ${esc(outcomeLabel(queue))}` : ''}`
+    : `from “${esc(queue.sessionTitle || 'this session')}”`);
+  const from = fromParts.length > 2 ? `${fromParts.slice(0, 2).join(' · ')} · …` : fromParts.join(' · ');
+  const omitted = sources.some(({ queue }) => queue.omitted > 0 || queue.truncated)
+    ? '<p class="habit-meta">Some older messages were left out.</p>'
     : '';
   reviewView.innerHTML =
     '<h2 class="habit-section-title">Suggested habits</h2>' +
-    `<p class="habit-meta">From “${esc(reviewQueue.sessionTitle || 'this session')}” — review before keeping.</p>` +
+    `<p class="habit-meta">${from} — review before keeping.</p>` +
     omitted +
     `<div class="habit-list">${cards}</div>` +
-    (reviewQueue.candidates.length > 1
+    (total > 1
       ? '<div class="actions subtle"><button data-candidate-action="dismiss-all" type="button" class="ghost sm">Dismiss all</button></div>'
       : '');
 };
+
+/** `<run>` from an `Imported · <run>` queue title; empty when absent. */
+const outcomeLabel = (queue: StoredReviewQueue): string =>
+  queue.sessionTitle.startsWith(IMPORT_TITLE_PREFIX)
+    ? queue.sessionTitle.slice(IMPORT_TITLE_PREFIX.length)
+    : '';
 
 const loadReviewQueue = async (sessionId: string | null): Promise<void> => {
   const epoch = ++reviewEpoch;
@@ -332,35 +384,81 @@ const persistReviewQueue = async (): Promise<boolean> => {
   }
 };
 
+const loadImportQueue = async (dir: string | null): Promise<void> => {
+  const epoch = ++importEpoch;
+  if (dir === null) {
+    importQueue = null;
+    paintReview();
+    return;
+  }
+  try {
+    const stored = await host.storage.get(importQueueKey(dir));
+    if (epoch !== importEpoch) return;
+    const queue = readStoredReviewQueue(stored);
+    importQueue = queue && queue.candidates.length > 0 ? queue : null;
+  } catch {
+    if (epoch !== importEpoch) return;
+    importQueue = null;
+  }
+  paintReview();
+};
+
+const persistImportQueue = async (): Promise<boolean> => {
+  if (directory === null) return true;
+  try {
+    if (!importQueue || importQueue.candidates.length === 0) {
+      await host.storage.delete(importQueueKey(directory));
+    } else {
+      await host.storage.set(importQueueKey(directory), JSON.parse(JSON.stringify(importQueue)));
+    }
+    return true;
+  } catch {
+    say('Could not update the imported queue.');
+    return false;
+  }
+};
+
+const setQueue = (origin: QueueOrigin, queue: StoredReviewQueue | null): void => {
+  if (origin === 'session') reviewQueue = queue;
+  else importQueue = queue;
+};
+
 const keepCandidate = async (candidateId: string): Promise<void> => {
-  if (!reviewQueue) return;
-  const candidate = reviewQueue.candidates.find((item) => item.id === candidateId);
+  const found = queueForCandidate(candidateId);
+  if (!found) return;
+  const { origin, queue } = found;
+  const candidate = queue.candidates.find((item) => item.id === candidateId);
   if (!candidate) return;
-  // Pin scope to the analyzed session's project: falling back to the current
-  // directory here would misattribute a suggestion when the user switched
-  // projects after the analysis ran.
-  const targetDirectory = reviewQueue.directory;
+  // Pin scope to the queue's recorded project. Session queues carry their own
+  // directory (null means a global session); import queues are always project
+  // scoped. Never fall back to the current directory — that misattributes a
+  // suggestion after a project switch.
+  const targetDirectory = queue.directory;
   const scope: HabitScope = targetDirectory !== null ? 'project' : 'global';
   const evidence = candidate.evidence[0];
+  // Imported evidence ids point at Vitruvius turn ids, not host messages, so
+  // they are dangling pointers here. Provenance is the queue title
+  // ("Imported · <run>"), which names the ledger file to re-open — not an id
+  // Habit cannot resolve.
+  const imported = origin === 'import';
   const ok = await saveMemory({
     title: candidate.title,
     detail: candidate.detail,
     scope,
     directory: targetDirectory,
     source: {
-      sessionId: reviewSessionId,
-      sessionTitle: reviewQueue.sessionTitle,
-      messageId: evidence?.messageId ?? null,
-      role: evidence ? 'user' : null,
+      sessionId: origin === 'session' ? reviewSessionId : null,
+      sessionTitle: queue.sessionTitle,
+      messageId: imported ? null : (evidence?.messageId ?? null),
+      role: imported ? null : (evidence ? 'user' : null),
     },
   });
   if (!ok) return;
-  const prev = reviewQueue;
-  const next = prev.candidates.filter((item) => item.id !== candidateId);
-  reviewQueue = next.length > 0 ? { ...prev, candidates: next } : null;
-  const saved = await persistReviewQueue();
+  const next = queue.candidates.filter((item) => item.id !== candidateId);
+  setQueue(origin, next.length > 0 ? { ...queue, candidates: next } : null);
+  const saved = origin === 'session' ? await persistReviewQueue() : await persistImportQueue();
   if (!saved) {
-    reviewQueue = prev;
+    setQueue(origin, queue);
     paint();
     return;
   }
@@ -368,13 +466,14 @@ const keepCandidate = async (candidateId: string): Promise<void> => {
 };
 
 const dismissCandidate = async (candidateId: string): Promise<void> => {
-  if (!reviewQueue) return;
-  const prev = reviewQueue;
-  const next = prev.candidates.filter((item) => item.id !== candidateId);
-  reviewQueue = next.length > 0 ? { ...prev, candidates: next } : null;
-  const saved = await persistReviewQueue();
+  const found = queueForCandidate(candidateId);
+  if (!found) return;
+  const { origin, queue } = found;
+  const next = queue.candidates.filter((item) => item.id !== candidateId);
+  setQueue(origin, next.length > 0 ? { ...queue, candidates: next } : null);
+  const saved = origin === 'session' ? await persistReviewQueue() : await persistImportQueue();
   if (!saved) {
-    reviewQueue = prev;
+    setQueue(origin, queue);
     paint();
     return;
   }
@@ -382,10 +481,107 @@ const dismissCandidate = async (candidateId: string): Promise<void> => {
 };
 
 const dismissAllCandidates = async (): Promise<void> => {
-  if (!reviewQueue) return;
+  const prevSession = reviewQueue;
+  const prevImport = importQueue;
+  if (!prevSession && !prevImport) return;
   reviewQueue = null;
-  const saved = await persistReviewQueue();
-  if (saved) say('Suggestions dismissed.');
+  importQueue = null;
+  const sessionSaved = await persistReviewQueue();
+  const importSaved = await persistImportQueue();
+  if (!sessionSaved || !importSaved) {
+    reviewQueue = prevSession;
+    importQueue = prevImport;
+    paint();
+    return;
+  }
+  say('Suggestions dismissed.');
+  paint();
+};
+
+/**
+ * Stage a Vitruvius ledger into the project's import queue. Validation runs
+ * against the window embedded in the ledger — the same contract as live
+ * extraction. Re-importing the same text is a no-op.
+ */
+const runLedgerImport = async (text: string, sourceLabel: string): Promise<void> => {
+  if (directory === null) {
+    say('Open a project before importing.');
+    return;
+  }
+  const outcome = parseLedger(text);
+  if (outcome.status === 'invalid') {
+    say(`Import failed: ${outcome.reason}`);
+    return;
+  }
+
+  // Length plus two salted 32-bit hashes: a bare FNV id collides across
+  // ledgers often enough to silently swallow a real import.
+  const fingerprint = `${text.length}:${hashText(text)}:${hashText(`${text.length}:${text}`)}`;
+  const markerKey = importedLedgerKey(directory, fingerprint);
+  try {
+    if ((await host.storage.get(markerKey)) !== undefined) {
+      say('That ledger was already imported.');
+      return;
+    }
+  } catch {
+    // An unreadable marker only means the exact-reimport guard is unavailable;
+    // the title dedupe below still prevents duplicates.
+  }
+
+  // Only habits visible here block an import: a same-titled habit in another
+  // project is a different scope, not a duplicate.
+  const existing: Array<{ title: string }> = [
+    ...(reviewQueue?.candidates ?? []),
+    ...(importQueue?.candidates ?? []),
+    ...visibleForDirectory(memories, directory),
+  ];
+  const fresh = outcome.ledger.candidates.filter((candidate) => !isDuplicateTitle(candidate.title, existing));
+
+  if (fresh.length > 0) {
+    // Re-read the stored queue: a load that started before this import must
+    // not have its candidates clobbered by our in-memory base.
+    let stored: StoredReviewQueue | null = null;
+    try {
+      stored = readStoredReviewQueue(await host.storage.get(importQueueKey(directory)));
+    } catch {
+      stored = null;
+    }
+    importEpoch += 1;
+    importQueue = {
+      candidates: mergeCandidates(stored?.candidates ?? [], importQueue?.candidates ?? [], fresh),
+      sessionTitle: importQueue?.sessionTitle
+        ?? stored?.sessionTitle
+        ?? `${IMPORT_TITLE_PREFIX}${outcome.ledger.run || sourceLabel}`,
+      directory,
+      analyzedAt: Date.now(),
+      omitted: 0,
+      truncated: false,
+    };
+    const saved = await persistImportQueue();
+    if (!saved) return;
+  }
+
+  // Mark exact re-imports only when something staged: an all-duplicate import
+  // must stay retryable after the blocking habit is deleted.
+  if (fresh.length > 0) {
+    try {
+      await host.storage.set(
+        markerKey,
+        JSON.parse(JSON.stringify({ at: Date.now(), source: sourceLabel, staged: fresh.length })),
+      );
+    } catch {
+      // Best-effort marker; not worth failing an otherwise-good import.
+    }
+  }
+
+  if (fresh.length === 0) {
+    say(outcome.ledger.candidates.length === 0
+      ? 'That ledger has no candidates.'
+      : 'Nothing new in that ledger; every candidate is already staged or kept.');
+  } else {
+    const rejected = outcome.rejected > 0 ? ` (${outcome.rejected} rejected.)` : '';
+    say(`${fresh.length} imported candidate${fresh.length === 1 ? '' : 's'} ready to review.${rejected}`);
+  }
   paint();
 };
 
@@ -868,6 +1064,17 @@ reviewView.addEventListener('click', (event) => {
   })().catch(() => say('That failed.'));
 });
 
+importView.addEventListener('click', (event) => {
+  const button = (event.target as HTMLElement | null)?.closest('[data-import-action]') as HTMLElement | null;
+  if (!button) return;
+  const text = (importView.querySelector('[data-field="ledger"]') as HTMLTextAreaElement | null)?.value ?? '';
+  if (text.trim().length === 0) {
+    say('Paste a ledger first.');
+    return;
+  }
+  void runLedgerImport(text, 'pasted').catch(() => say('Import failed.'));
+});
+
 applyView.addEventListener('click', (event) => {
   const button = (event.target as HTMLElement | null)?.closest('[data-apply-action]') as HTMLElement | null;
   if (!button || button.hasAttribute('disabled')) return;
@@ -942,6 +1149,7 @@ host.onReady((context) => {
   if (context.item !== null && context.item !== undefined) prefillFromItem(context.item, 'ready');
   void refresh();
   void loadReviewQueue(context.session?.id ?? null);
+  void loadImportQueue(context.directory);
 });
 
 host.onItem((item) => {
@@ -961,6 +1169,7 @@ host.onSessionLifecycle((event) => {
 host.onDirectory((next) => {
   directory = next;
   paint();
+  void loadImportQueue(next);
 });
 
 host.onSession((next) => {
@@ -1013,6 +1222,15 @@ host.onResolve((request) => {
       message: visible.length === 0 ? 'No habits here yet.' : `${visible.length} habit(s): ${visible.slice(0, 3).map((m) => m.title).join(', ')}${visible.length > 3 ? '…' : ''}`,
     });
     return Promise.resolve(null);
+  }
+  if (command === 'habit-import') {
+    if (directory === null) throw new Error('Open a project before importing.');
+    if (args.length === 0) throw new Error('Usage: /habit-import <relative path to ledger>');
+    return host.readFile(args)
+      .then(({ content }) => runLedgerImport(content, args))
+      .then(() => null, (error) => {
+        throw new Error(fileErrorText(error));
+      });
   }
   throw new Error(`Unknown command: ${command}`);
 });

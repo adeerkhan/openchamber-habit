@@ -30,9 +30,12 @@ updates** in Settings → Extensions.
    review. **Nothing is kept until you press Keep.**
 3. Or type `/remember tabs, not spaces | enforced by .editorconfig` in the
    composer.
-4. Back in the panel, press **Insert** on a habit to append it to your draft,
+4. If you run Vitruvius, run `/habit` there, then `/habit-import
+   outputs/.habits/<slug>.json` here — or paste the ledger into the panel's
+   **Import from Vitruvius** box.
+5. Back in the panel, press **Insert** on a habit to append it to your draft,
    or **Apply to AGENTS.md** to write this project's habits into the file.
-5. `/habits` counts what is kept here; `/forget <title>` drops one.
+6. `/habits` counts what is kept here; `/forget <title>` drops one.
 
 Habit redacts recognized secret patterns in titles and details before saving
 and reports when it does. This is best-effort, not a guarantee: review what
@@ -50,18 +53,25 @@ you save and do not use Habit to store credentials.
    session with no durable preferences. Re-clicking with nothing new makes no
    model call. The rail badge counts completed turns since you last reviewed;
    a failed turn does not count.
-3. **Store** — host namespaced storage, keyed by a short hash of the project
+3. **Import** — a harness subagent (the `habit` role in
+   [Vitruvius](https://github.com/adeerkhan/vitruvius)) reads a live session
+   from inside the agent and writes a *ledger* under `outputs/.habits/`. Run
+   `/habit-import <path>` or paste the ledger into the panel. Habit validates
+   every candidate against the transcript window embedded in the ledger before
+   review. Re-importing the same ledger is a no-op. The extension itself never
+   reads a conversation without a click.
+4. **Store** — host namespaced storage, keyed by a short hash of the project
    directory plus per-memory ids. Globals show everywhere; project habits
    show only in their project. Memories live on the connected OpenChamber
    server, which may be remote.
-4. **Apply** — **Apply to AGENTS.md** writes this project's habits into the
+5. **Apply** — **Apply to AGENTS.md** writes this project's habits into the
    project `AGENTS.md` inside `<!-- habit:start -->` / `<!-- habit:end -->`,
    after showing the exact block. Everything outside the markers is kept
    byte-for-byte. If the file changed outside the block since the last write,
    Habit stops and asks before replacing. A running session must be restarted
    for the model to load the change. Deleting a habit does not edit the file;
    re-apply to update it.
-5. **Recall** — the panel lists what applies here; Insert composes it into
+6. **Recall** — the panel lists what applies here; Insert composes it into
    the draft, Copy takes it to the clipboard. Edit and Forget curate.
 
 ## Feedback counts
@@ -90,7 +100,8 @@ may be committed or synced.
 ## Make it yours
 
 `panel/habits.ts` is the pure memory logic (keys, redaction, matching,
-formatting). `panel/extraction.ts` is the pure extraction/validation logic and
+formatting). `panel/extraction.ts` is the pure extraction/validation logic,
+`panel/import-ledger.ts` parses and validates Vitruvius ledgers, and
 `panel/apply.ts` is the pure AGENTS.md block/diff logic. Each has a test beside
 it (`bun test panel`). `panel/main.ts` is the whole panel. The checked-in
 `panel/main.js` is its built bundle — installation never builds source. Rebuild

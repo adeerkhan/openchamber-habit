@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import {
   analyzeSession,
+  EXTRACTION_PROMPT_VERSION,
   EXTRACTION_SYSTEM_PROMPT,
   extractCandidates,
   lastAnalyzedKey,
@@ -46,8 +47,17 @@ const makeHost = (
 describe('the extraction prompt', () => {
   test('fits the SDK system-prompt cap and demands an empty answer by default', () => {
     expect(EXTRACTION_SYSTEM_PROMPT.length).toBeLessThanOrEqual(8_000);
-    expect(EXTRACTION_SYSTEM_PROMPT).toContain('{"candidates":[]}');
-    expect(EXTRACTION_SYSTEM_PROMPT).toContain('Assistant messages are context and are never evidence');
+    expect(EXTRACTION_SYSTEM_PROMPT).toContain('{"c":[]}');
+    expect(EXTRACTION_SYSTEM_PROMPT).toContain('Assistant turns are context and are never evidence');
+    expect(EXTRACTION_SYSTEM_PROMPT).toContain('## Drop');
+    expect(EXTRACTION_SYSTEM_PROMPT).toContain('## Abstain');
+  });
+
+  test('uses the compact wire schema so output tokens stay down', () => {
+    expect(EXTRACTION_SYSTEM_PROMPT).toContain('"t"');
+    expect(EXTRACTION_SYSTEM_PROMPT).toContain('"d"');
+    expect(EXTRACTION_SYSTEM_PROMPT).toContain('"e"');
+    expect(EXTRACTION_PROMPT_VERSION).toBe('2');
   });
 });
 
@@ -123,6 +133,14 @@ describe('extractCandidates', () => {
 
   test('accepts a user-cited candidate', () => {
     const result = extractCandidates(candidateJson(), window);
+    expect(result.ok).toBe(true);
+    expect(result.candidates).toHaveLength(1);
+    expect(result.candidates[0].title).toBe('Use tabs');
+    expect(result.candidates[0].evidence).toEqual([{ messageId: 'u1', role: 'user' }]);
+  });
+
+  test('accepts the compact wire keys the prompt asks for', () => {
+    const result = extractCandidates(JSON.stringify({ c: [{ t: 'Use tabs', d: '', e: ['u1'] }] }), window);
     expect(result.ok).toBe(true);
     expect(result.candidates).toHaveLength(1);
     expect(result.candidates[0].title).toBe('Use tabs');

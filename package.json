@@ -28,6 +28,10 @@
         {
           "name": "habits",
           "description": "Count the habits kept here"
+        },
+        {
+          "name": "habit-import",
+          "description": "Import a Vitruvius habit ledger from a project-relative path"
         }
       ],
       "actions": [
@@ -50,7 +54,8 @@
     }
   },
   "scripts": {
-    "build": "openchamber-guest-bundle panel/main.ts panel/main.js"
+    "build": "openchamber-guest-bundle panel/main.ts panel/main.js",
+    "test": "bun test panel manifest.test.ts"
   },
   "dependencies": {
     "@openchamber/sdk": "1.24.0"

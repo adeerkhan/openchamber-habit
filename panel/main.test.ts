@@ -17,9 +17,12 @@ test('capture inputs survive ready refresh and context repaints', async () => {
   let captureInput: (event: any) => void;
   let reviewClick: (event: any) => void;
   let applyClick: (event: any) => void;
+  let importClick: (event: any) => void;
   let listHtml = '';
   let reviewHtml = '';
   let applyHtml = '';
+  let importHtml = '';
+  const files = new Map<string, string>();
   const editFields = new Map<string, { value: string }>();
   let failKeys = false;
   let holdGet: ((key: string, value: any) => Promise<any>) | null = null;
@@ -52,11 +55,13 @@ test('capture inputs survive ready refresh and context repaints', async () => {
     ['[data-view="list"]', view()],
     ['[data-view="review"]', view()],
     ['[data-view="apply"]', view()],
+    ['[data-view="import"]', view()],
     ['[data-view="notice"]', view()],
   ]);
   const list = views.get('[data-view="list"]')!;
   const review = views.get('[data-view="review"]')!;
   const apply = views.get('[data-view="apply"]')!;
+  const importPanel = views.get('[data-view="import"]')!;
   Object.defineProperty(list, 'innerHTML', { set(value: string) {
     listHtml = value;
     editFields.clear();
@@ -75,12 +80,16 @@ test('capture inputs survive ready refresh and context repaints', async () => {
   }) as typeof capture.addEventListener;
   Object.defineProperty(review, 'innerHTML', { set(value: string) { reviewHtml = value; } });
   Object.defineProperty(apply, 'innerHTML', { set(value: string) { applyHtml = value; } });
+  Object.defineProperty(importPanel, 'innerHTML', { set(value: string) { importHtml = value; } });
   review.addEventListener = ((name: string, handler: (event: any) => void) => {
     if (name === 'click') reviewClick = handler;
   }) as typeof review.addEventListener;
   apply.addEventListener = ((name: string, handler: (event: any) => void) => {
     if (name === 'click') applyClick = handler;
   }) as typeof apply.addEventListener;
+  importPanel.addEventListener = ((name: string, handler: (event: any) => void) => {
+    if (name === 'click') importClick = handler;
+  }) as typeof importPanel.addEventListener;
   const rowFor = (key: string) => ({
     getAttribute: (name: string) => name === 'data-key' ? key : key.split(':').at(-1),
     querySelector: (selector: string) => editFields.get(selector),
@@ -133,9 +142,13 @@ test('capture inputs survive ready refresh and context repaints', async () => {
         generateCalls.push({ prompt: request.prompt, system: request.system });
         return { text: generateAnswer };
       },
-      readFile: async () => {
-        if (agentsFile === null) throw Object.assign(new Error('missing'), { code: 'NOT_FOUND' });
-        return { content: agentsFile };
+      readFile: async (path: string) => {
+        if (files.has(path)) return { content: files.get(path)! };
+        if (path === 'AGENTS.md') {
+          if (agentsFile === null) throw Object.assign(new Error('missing'), { code: 'NOT_FOUND' });
+          return { content: agentsFile };
+        }
+        throw Object.assign(new Error('missing'), { code: 'NOT_FOUND' });
       },
       writeFile: async (_path: string, content: string) => { agentsFile = content; return { written: true as const }; },
       onReady: (fn: (value: any) => any) => { callbacks.ready = fn; },
@@ -421,6 +434,85 @@ test('capture inputs survive ready refresh and context repaints', async () => {
     await settle();
     expect(agentsFile.startsWith('manual note')).toBe(true);
     expect(agentsFile).toContain('- Use tabs');
+
+    // --- Vitruvius ledger import -----------------------------------------
+    const ledger1 = JSON.stringify({
+      version: 1, run: 'bridge-1', scope: 'civil',
+      window: [
+        { id: 'u1', role: 'user', text: 'Always cite section numbers', createdAt: 1 },
+        { id: 'a1', role: 'assistant', text: 'ok', createdAt: 2 },
+      ],
+      c: [{ t: 'Cite section numbers', d: '', e: ['u1'] }],
+    });
+    files.set('outputs/.habits/bridge-1.json', ledger1);
+    const importQueueKeyForB = `analysis:import:${hashDirectory('/b')}`;
+
+    await callbacks.resolve({ command: 'habit-import', args: 'outputs/.habits/bridge-1.json' });
+    await settle();
+    expect(stored.has(importQueueKeyForB)).toBe(true);
+    expect(reviewHtml).toContain('Cite section numbers');
+    expect(reviewHtml).toContain('imported · Vitruvius');
+
+    // Re-importing the same ledger is a no-op.
+    await callbacks.resolve({ command: 'habit-import', args: 'outputs/.habits/bridge-1.json' });
+    await settle();
+    expect(views.get('[data-view="notice"]')!.textContent).toContain('already imported');
+    expect((reviewHtml.match(/data-candidate="/g) ?? []).length).toBe(1);
+
+    // Keep the imported candidate: project habit, user evidence, queue emptied.
+    const importedId = reviewHtml.match(/data-candidate="([^"]+)"/)![1];
+    reviewClickAction('keep', importedId);
+    await settle();
+    const imported = [...stored.values()].find((memory: any) => memory?.title === 'Cite section numbers');
+    expect(imported.scope).toBe('project');
+    expect(imported.directory).toBe('/b');
+    // Vitruvius turn ids are not host messages: provenance is the run title,
+    // never a dangling message id.
+    expect(imported.source).toEqual({ sessionId: null, sessionTitle: 'Imported · bridge-1', messageId: null, role: null });
+    expect(stored.has(importQueueKeyForB)).toBe(false);
+
+    // Paste path stages candidates; a ledger without a window is refused.
+    const pasteLedger = (content: string) => {
+      (importPanel.querySelector('[data-field="ledger"]') as any).value = content;
+      importClick({ target: { closest: (selector: string) => (selector === '[data-import-action]' ? { getAttribute: () => 'import' } : null) } });
+    };
+    const ledger2 = JSON.stringify({
+      version: 1, run: 'bridge-2',
+      window: [{ id: 'u2', role: 'user', text: 'Blind verify', createdAt: 3 }],
+      c: [{ t: 'Blind verify before delivery', d: '', e: ['u2'] }],
+    });
+    pasteLedger(ledger2);
+    await settle();
+    expect(reviewHtml).toContain('Blind verify before delivery');
+
+    pasteLedger('{"version":1,"c":[]}');
+    await settle();
+    expect(views.get('[data-view="notice"]')!.textContent).toContain('Import failed');
+    expect(reviewHtml).toContain('Blind verify before delivery'); // unchanged
+
+    // A same-titled habit in another project must not block this one.
+    stored.set(`habit:p:${hashDirectory('/other')}:foreign2`, {
+      id: 'foreign2', title: 'Name test cases', detail: '', scope: 'project',
+      directory: '/other', directoryHash: hashDirectory('/other'),
+      source: { sessionId: null, sessionTitle: '', messageId: null, role: null },
+      createdAt: 0, updatedAt: 0,
+    });
+    const ledger3 = JSON.stringify({
+      version: 1, run: 'bridge-3',
+      window: [{ id: 'u3', role: 'user', text: 'Name tests well', createdAt: 4 }],
+      c: [{ t: 'Name test cases', d: '', e: ['u3'] }],
+    });
+    files.set('outputs/.habits/bridge-3.json', ledger3);
+    await callbacks.resolve({ command: 'habit-import', args: 'outputs/.habits/bridge-3.json' });
+    await settle();
+    expect((reviewHtml.match(/data-candidate="/g) ?? []).length).toBe(2);
+
+    // The same ledger text imports cleanly in a second project.
+    callbacks.directory('/other');
+    await settle();
+    await callbacks.resolve({ command: 'habit-import', args: 'outputs/.habits/bridge-1.json' });
+    await settle();
+    expect(reviewHtml).toContain('Cite section numbers');
   } finally {
     mock.restore();
     if (previousDocument) Object.defineProperty(globalThis, 'document', previousDocument);
